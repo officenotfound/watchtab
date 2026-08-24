@@ -1079,7 +1079,6 @@ function App() {
       </button>
 
       <div className="footer">
-        <span>MIT licensed, no account required</span>
         <a href="https://github.com/officenotfound/watchtab" target="_blank" rel="noreferrer">
           source
         </a>
