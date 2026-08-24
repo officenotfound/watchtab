@@ -1,47 +1,46 @@
 :root {
-  --bg: #faf9f6;
-  --ink: #1c1d1b;
-  --ink-muted: #5a5d58;
-  --accent: #2c4a52;
-  --accent-strong: #1e343a;
-  --line: #ddd9d0;
+  --bg: #f2f2f7;
+  --ink: #1c1c1e;
+  --ink-muted: #6e6e73;
+  --accent: #007aff;
+  --accent-strong: #0062cc;
+  --line: #d1d1d6;
   --surface: #ffffff;
-  --surface-sunken: #f1efe9;
-  --danger: #a13d2e;
-  --ok: #3d6b52;
+  --surface-sunken: #ffffff;
+  --danger: #ff3b30;
+  --ok: #34c759;
 
-  --font-display: 'Fraunces', Georgia, 'Times New Roman', serif;
-  --font-body: 'Source Sans 3', system-ui, -apple-system, Segoe UI, Helvetica, Arial, sans-serif;
-  --font-mono: 'IBM Plex Mono', ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  --font-body: -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Segoe UI', system-ui, sans-serif;
+  --font-mono: ui-monospace, 'SF Mono', Menlo, Consolas, monospace;
 
   color-scheme: light dark;
 }
 
 :root[data-theme='dark'] {
-  --bg: #17181a;
-  --ink: #f2f1ec;
-  --ink-muted: #a8aca6;
-  --accent: #6fa3ac;
-  --accent-strong: #8fbac2;
-  --line: #33352f;
-  --surface: #201f1c;
-  --surface-sunken: #1b1a17;
-  --danger: #d68877;
-  --ok: #7fb89a;
+  --bg: #1c1c1e;
+  --ink: #f2f2f7;
+  --ink-muted: #98989d;
+  --accent: #0a84ff;
+  --accent-strong: #409cff;
+  --line: #38383a;
+  --surface: #2c2c2e;
+  --surface-sunken: #2c2c2e;
+  --danger: #ff453a;
+  --ok: #30d158;
 }
 
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme='light']) {
-    --bg: #17181a;
-    --ink: #f2f1ec;
-    --ink-muted: #a8aca6;
-    --accent: #6fa3ac;
-    --accent-strong: #8fbac2;
-    --line: #33352f;
-    --surface: #201f1c;
-    --surface-sunken: #1b1a17;
-    --danger: #d68877;
-    --ok: #7fb89a;
+    --bg: #1c1c1e;
+    --ink: #f2f2f7;
+    --ink-muted: #98989d;
+    --accent: #0a84ff;
+    --accent-strong: #409cff;
+    --line: #38383a;
+    --surface: #2c2c2e;
+    --surface-sunken: #2c2c2e;
+    --danger: #ff453a;
+    --ok: #30d158;
   }
 }
 
@@ -56,7 +55,7 @@ body {
 }
 
 body {
-  width: 380px;
+  width: 320px;
   background: var(--bg);
   color: var(--ink);
   font-family: var(--font-body);
@@ -77,9 +76,9 @@ button {
 }
 
 input {
-  font-family: var(--font-mono);
+  font-family: var(--font-body);
 }
 
 a {
-  color: var(--accent-strong);
+  color: var(--accent);
 }
