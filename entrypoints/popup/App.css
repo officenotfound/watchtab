@@ -81,7 +81,6 @@
   border-radius: 8px;
   padding: 2px;
   margin-bottom: 10px;
-  overflow: hidden;
 }
 
 .tabRow {
@@ -90,17 +89,13 @@
 
 .modeButton {
   flex: 1;
-  min-width: 0;
   background: transparent;
   border: none;
   border-right: 1px solid var(--line);
   border-radius: 0;
-  padding: 5px 4px;
-  font-size: 11px;
+  padding: 5px 6px;
+  font-size: 11.5px;
   color: var(--ink);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
   transition: background var(--transition-duration, 0.15s) ease, box-shadow var(--transition-duration, 0.15s) ease;
 }
 
