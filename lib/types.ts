@@ -264,8 +264,6 @@ export function resolveIntervalSeconds(interval: IntervalConfig): number {
 export type RuntimeMessage =
   | { type: 'user-interaction' }
   | { type: 'get-my-state' }
-  | { type: 'get-appearance' }
-  | { type: 'set-appearance'; settings: import('./appearance').AppearanceSettings }
   | { type: 'get-state'; tabId: number }
   | { type: 'start'; tabId: number; settings: TabSettings }
   | { type: 'stop'; tabId: number }

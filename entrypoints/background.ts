@@ -1,13 +1,5 @@
 import { browser } from 'wxt/browser';
-import {
-  getAllTabStates,
-  getAppearanceSettings,
-  getTabState,
-  removeTabState,
-  setAppearanceSettings,
-  setTabState,
-} from '@/lib/storage';
-import { ACCENT_COLOR_VALUES } from '@/lib/appearance';
+import { getAllTabStates, getTabState, removeTabState, setTabState } from '@/lib/storage';
 import {
   createDefaultSiteConditionsState,
   createDefaultState,
@@ -88,7 +80,6 @@ async function stopWatching(tabId: number): Promise<void> {
   if (state) {
     await setTabState({ ...state, active: false, paused: false, nextRefreshAt: null });
   }
-  await recomputeBadge();
 }
 
 async function pauseWatching(tabId: number): Promise<void> {
@@ -96,14 +87,12 @@ async function pauseWatching(tabId: number): Promise<void> {
   if (!state || !state.active || state.paused) return;
   clearTimer(tabId);
   await setTabState({ ...state, paused: true, nextRefreshAt: null });
-  await recomputeBadge();
 }
 
 async function resumeWatching(tabId: number): Promise<void> {
   const state = await getTabState(tabId);
   if (!state || !state.active || !state.paused) return;
   await scheduleNext({ ...state, paused: false });
-  await recomputeBadge();
 }
 
 async function startWatching(tabId: number, settings: Partial<TabWatchState>): Promise<void> {
@@ -127,7 +116,6 @@ async function startWatching(tabId: number, settings: Partial<TabWatchState>): P
     siteConditionsState: createDefaultSiteConditionsState(),
   };
   await scheduleNext(next);
-  await recomputeBadge();
 }
 
 /** Persists settings whether or not the tab is currently refreshing, and reschedules live if it is. */
@@ -141,7 +129,6 @@ async function updateSettings(tabId: number, settings: Partial<TabWatchState>): 
   if (next.active && !next.paused) {
     await scheduleNext(next);
   }
-  await recomputeBadge();
 }
 
 /** Applies every cookie rule for the given timing against the tab's current URL. */
@@ -224,7 +211,6 @@ async function handleRefreshDue(tabId: number): Promise<void> {
   if (updated.refreshLimit !== null && updated.refreshCount >= updated.refreshLimit) {
     await setTabState({ ...updated, active: false, nextRefreshAt: null });
     clearTimer(tabId);
-    await recomputeBadge();
     return;
   }
 
@@ -489,32 +475,6 @@ async function handleCanonicalNavigation(tabId: number, committedUrl: string): P
   await fireSiteConditionAlert(tabId, 'redirect', false);
 }
 
-/**
- * Recomputes the toolbar badge to reflect the count of distinct tabs that
- * are either actively refreshing or have monitoring enabled (whichever tab
- * matches either condition is counted once, not summed twice). Respects the
- * global `showBadgeCount` appearance setting, which lives outside per-tab
- * storage (see lib/storage.ts's APPEARANCE_KEY), so it's read separately.
- */
-async function recomputeBadge(): Promise<void> {
-  try {
-    const appearance = await getAppearanceSettings();
-    if (!appearance.showBadgeCount) {
-      await browser.action.setBadgeText({ text: '' });
-      return;
-    }
-    const all = await getAllTabStates();
-    const count = all.filter((state) => state.active || state.monitor.enabled).length;
-    await browser.action.setBadgeText({ text: count > 0 ? String(count) : '' });
-    if (count > 0) {
-      const accent = ACCENT_COLOR_VALUES[appearance.accentColor]?.dark ?? ACCENT_COLOR_VALUES.blue.dark;
-      await browser.action.setBadgeBackgroundColor({ color: accent });
-    }
-  } catch (err) {
-    console.error('watchtab: recomputeBadge failed', err);
-  }
-}
-
 /** Re-arms in-memory timers from persisted state after a service worker restart. */
 async function recoverActiveTimers(): Promise<void> {
   const all = await getAllTabStates();
@@ -534,7 +494,6 @@ async function recoverActiveTimers(): Promise<void> {
 export default defineBackground(() => {
   browser.alarms.create(HEARTBEAT_ALARM, { periodInMinutes: HEARTBEAT_MINUTES });
   void recoverActiveTimers();
-  void recomputeBadge();
 
   browser.alarms.onAlarm.addListener((alarm) => {
     if (alarm.name === HEARTBEAT_ALARM) void recoverActiveTimers();
@@ -582,16 +541,6 @@ export default defineBackground(() => {
             void enqueueForTab(tabId, () => pauseWatching(tabId));
           }
           return false;
-        }
-        case 'get-appearance': {
-          void getAppearanceSettings().then(sendResponse);
-          return true;
-        }
-        case 'set-appearance': {
-          void setAppearanceSettings(message.settings)
-            .then(() => recomputeBadge())
-            .then(() => sendResponse(true));
-          return true;
         }
         case 'get-my-state': {
           const tabId = sender.tab?.id;

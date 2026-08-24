@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type CSSProperties } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { browser } from 'wxt/browser';
 import {
   createDefaultState,
@@ -17,12 +17,6 @@ import {
   type TabWatchState,
 } from '@/lib/types';
 import { EXPRESSION_TEMPLATES } from '@/lib/templates';
-import {
-  ACCENT_COLOR_VALUES,
-  DEFAULT_APPEARANCE_SETTINGS,
-  type AccentColor,
-  type AppearanceSettings,
-} from '@/lib/appearance';
 import './App.css';
 
 function newId(prefix: string): string {
@@ -40,26 +34,14 @@ function formatPreset(seconds: number): string {
   return seconds < 60 ? `${seconds}s` : `${seconds / 60}m`;
 }
 
-type PopupTab = 'refresh' | 'monitor' | 'automation' | 'conditions' | 'settings';
+type PopupTab = 'refresh' | 'monitor' | 'automation' | 'conditions';
 
 const POPUP_TABS: [PopupTab, string][] = [
   ['refresh', 'Refresh'],
   ['monitor', 'Monitor'],
   ['automation', 'Automation'],
   ['conditions', 'Conditions'],
-  ['settings', 'Settings'],
 ];
-
-const ACCENT_COLORS: AccentColor[] = ['blue', 'purple', 'green', 'orange', 'pink'];
-
-/** Resolves whichever half of an accent pair (light/dark) is active right now, for the CSS var override. */
-function resolveAccentPair(color: AccentColor): { accent: string; accentStrong: string } {
-  const prefersDark = typeof window !== 'undefined' && window.matchMedia?.('(prefers-color-scheme: dark)').matches;
-  const pair = ACCENT_COLOR_VALUES[color];
-  return prefersDark
-    ? { accent: pair.dark, accentStrong: pair.light }
-    : { accent: pair.light, accentStrong: pair.dark };
-}
 
 function App() {
   const [tabId, setTabId] = useState<number | null>(null);
@@ -71,7 +53,6 @@ function App() {
   const [recordedSteps, setRecordedSteps] = useState<MacroStep[]>([]);
   const [macroJsonText, setMacroJsonText] = useState('');
   const [macroJsonError, setMacroJsonError] = useState<string | null>(null);
-  const [appearance, setAppearance] = useState<AppearanceSettings>(DEFAULT_APPEARANCE_SETTINGS);
 
   useEffect(() => {
     function handler(message: unknown) {
@@ -107,34 +88,6 @@ function App() {
   }, []);
 
   useEffect(() => {
-    // Independent of the per-tab state fetch above — global appearance has
-    // no relationship to tabId, so it's fetched in parallel and applied
-    // whenever it resolves rather than gating the per-tab init.
-    let cancelled = false;
-    (async () => {
-      const existing = (await browser.runtime.sendMessage({ type: 'get-appearance' })) as AppearanceSettings | null;
-      if (!cancelled && existing) setAppearance({ ...DEFAULT_APPEARANCE_SETTINGS, ...existing });
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, []);
-
-  async function applyAppearance(partial: Partial<AppearanceSettings>) {
-    const next = { ...appearance, ...partial };
-    setAppearance(next);
-    await browser.runtime.sendMessage({ type: 'set-appearance', settings: next });
-  }
-
-  const accentPair = useMemo(() => resolveAccentPair(appearance.accentColor), [appearance.accentColor]);
-  const rootStyle = {
-    '--glass-opacity': appearance.glassOpacity,
-    '--accent': accentPair.accent,
-    '--accent-strong': accentPair.accentStrong,
-    '--transition-duration': appearance.reduceMotion ? '0s' : '0.15s',
-  } as CSSProperties;
-
-  useEffect(() => {
     if (!tabId) return;
     const poll = window.setInterval(async () => {
       const fresh = (await browser.runtime
@@ -153,7 +106,7 @@ function App() {
 
   if (!state || !tabId) {
     return (
-      <div className="app" style={rootStyle}>
+      <div className="app">
         <p className="tabUrl">Loading tab…</p>
       </div>
     );
@@ -345,17 +298,9 @@ function App() {
   const previewSeconds = resolveIntervalSeconds(state.interval);
 
   return (
-    <div className="app" style={rootStyle}>
+    <div className="app">
       <div className="header">
-        <svg className="brandMark" viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg" aria-label="watchtab">
-          <path
-            d="M10 3.5a6.5 6.5 0 1 1-6.5 6.5"
-            stroke="var(--accent)"
-            strokeWidth="2.1"
-            strokeLinecap="round"
-          />
-          <path d="M3.5 5.8V10h4.2" stroke="var(--accent)" strokeWidth="2.1" strokeLinecap="round" strokeLinejoin="round" />
-        </svg>
+        <p className="brand">watchtab</p>
         <p className="tabUrl" title={tabTitle}>
           {tabTitle}
         </p>
@@ -1099,85 +1044,6 @@ function App() {
             {macroJsonError && <p className="toggleHint">Invalid JSON — {macroJsonError}</p>}
           </>
         )}
-      </div>
-      </>
-      )}
-
-      {activeTab === 'settings' && (
-      <>
-      <div className="section">
-        <p className="sectionLabel">Appearance</p>
-        <p className="toggleHint" style={{ margin: '0 0 6px 4px' }}>
-          Applies everywhere, not just this tab.
-        </p>
-
-        <div className="fieldRow" style={{ alignItems: 'center' }}>
-          <label htmlFor="glass-opacity">Glass transparency</label>
-          <input
-            id="glass-opacity"
-            type="range"
-            min={0}
-            max={100}
-            value={Math.round(appearance.glassOpacity * 100)}
-            onChange={(e) => void applyAppearance({ glassOpacity: Number(e.target.value) / 100 })}
-            style={{ flex: 1 }}
-          />
-          <span className="durationUnit" style={{ minWidth: '32px', textAlign: 'right' }}>
-            {Math.round(appearance.glassOpacity * 100)}%
-          </span>
-        </div>
-
-        <div className="fieldRow">
-          <label>Accent color</label>
-          <div className="swatchRow">
-            {ACCENT_COLORS.map((color) => {
-              const pair = ACCENT_COLOR_VALUES[color];
-              const selected = appearance.accentColor === color;
-              return (
-                <button
-                  key={color}
-                  type="button"
-                  className={`swatch${selected ? ' selected' : ''}`}
-                  aria-label={color}
-                  aria-pressed={selected}
-                  style={{ background: `linear-gradient(135deg, ${pair.light}, ${pair.dark})` }}
-                  onClick={() => void applyAppearance({ accentColor: color })}
-                >
-                  {selected && (
-                    <svg viewBox="0 0 12 12" width="10" height="10" fill="none" aria-hidden="true">
-                      <path d="M2.2 6.2 4.8 8.8 9.8 3.2" stroke="#fff" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
-                    </svg>
-                  )}
-                </button>
-              );
-            })}
-          </div>
-        </div>
-
-        <div className="toggleRow">
-          <span className="toggleLabel">
-            Reduce motion
-            <span className="toggleHint">Turns off toggle and segmented-control animations</span>
-          </span>
-          <input
-            type="checkbox"
-            className="switch"
-            checked={appearance.reduceMotion}
-            onChange={(e) => void applyAppearance({ reduceMotion: e.target.checked })}
-          />
-        </div>
-        <div className="toggleRow">
-          <span className="toggleLabel">
-            Show badge count
-            <span className="toggleHint">Shows the number of actively refreshing tabs on the toolbar icon</span>
-          </span>
-          <input
-            type="checkbox"
-            className="switch"
-            checked={appearance.showBadgeCount}
-            onChange={(e) => void applyAppearance({ showBadgeCount: e.target.checked })}
-          />
-        </div>
       </div>
       </>
       )}

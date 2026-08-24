@@ -8,15 +8,8 @@ import {
   DEFAULT_SITE_CONDITIONS_CONFIG,
   type TabWatchState,
 } from './types';
-import { DEFAULT_APPEARANCE_SETTINGS, type AppearanceSettings } from './appearance';
 
 const KEY_PREFIX = 'watchtab:tab:';
-/**
- * Deliberately NOT under KEY_PREFIX ("watchtab:tab:") — appearance settings
- * are global (extension-wide), not per-tab, and must never show up in
- * getAllTabStates()'s prefix-filtered enumeration below.
- */
-const APPEARANCE_KEY = 'watchtab:appearance';
 
 function keyFor(tabId: number): string {
   return `${KEY_PREFIX}${tabId}`;
@@ -59,16 +52,4 @@ export async function getAllTabStates(): Promise<TabWatchState[]> {
   return Object.entries(all)
     .filter(([key]) => key.startsWith(KEY_PREFIX))
     .map(([, value]) => normalize(value as TabWatchState));
-}
-
-// ---- global appearance settings (not per-tab) -----------------------------
-
-export async function getAppearanceSettings(): Promise<AppearanceSettings> {
-  const result = await browser.storage.local.get(APPEARANCE_KEY);
-  const raw = result[APPEARANCE_KEY] as Partial<AppearanceSettings> | undefined;
-  return { ...DEFAULT_APPEARANCE_SETTINGS, ...raw };
-}
-
-export async function setAppearanceSettings(settings: AppearanceSettings): Promise<void> {
-  await browser.storage.local.set({ [APPEARANCE_KEY]: settings });
 }
