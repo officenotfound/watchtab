@@ -27,3 +27,6 @@ web-ext.config.ts
 *.njsproj
 *.sln
 *.sw?
+e2e/.profile
+playwright-report
+test-results

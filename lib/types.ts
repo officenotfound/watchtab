@@ -13,6 +13,70 @@ export interface IntervalConfig {
   customSeconds: number;
 }
 
+export type MonitorScopeMode = 'full-page' | 'custom-area';
+export type MonitorExtractionMode = 'visual' | 'source';
+export type MonitorAlertMode = 'found' | 'lost' | 'any-change';
+export type MonitorTriggerKind = 'found' | 'lost' | 'any-change';
+
+export interface MonitorConfig {
+  enabled: boolean;
+  scopeMode: MonitorScopeMode;
+  /** CSS selector scoping the search when scopeMode is 'custom-area'. */
+  customSelector: string;
+  extractionMode: MonitorExtractionMode;
+  /** Raw comma-separated expression input: plain keywords, ##boolean##, @@xpath, $regex. */
+  keywords: string;
+  alertMode: MonitorAlertMode;
+  skipRepeat: boolean;
+  waitForLoadMs: number;
+  highlight: boolean;
+  windowFocus: boolean;
+  /** When false (the default), an alert trigger also stops active refreshing on this tab. */
+  continueRefreshingAfterAlert: boolean;
+}
+
+export interface MonitorRuntimeState {
+  lastScanAt: number | null;
+  /** Expressions that matched on the most recent scan. */
+  matchedKeys: string[];
+  /** Whether any expression has ever matched since monitoring started (used by lost-mode). */
+  hasEverMatched: boolean;
+  currentlyMatching: boolean;
+  lastTriggerAt: number | null;
+  lastTriggerKind: MonitorTriggerKind | null;
+  /** Content hash used by "any changes" mode. */
+  lastSnapshotHash: string | null;
+  /** Set when a custom-area selector isn't found, or an expression fails to parse. */
+  error: string | null;
+}
+
+export const DEFAULT_MONITOR_CONFIG: MonitorConfig = {
+  enabled: false,
+  scopeMode: 'full-page',
+  customSelector: '',
+  extractionMode: 'visual',
+  keywords: '',
+  alertMode: 'found',
+  skipRepeat: true,
+  waitForLoadMs: 0,
+  highlight: true,
+  windowFocus: false,
+  continueRefreshingAfterAlert: false,
+};
+
+export function createDefaultMonitorState(): MonitorRuntimeState {
+  return {
+    lastScanAt: null,
+    matchedKeys: [],
+    hasEverMatched: false,
+    currentlyMatching: false,
+    lastTriggerAt: null,
+    lastTriggerKind: null,
+    lastSnapshotHash: null,
+    error: null,
+  };
+}
+
 export interface TabWatchState {
   tabId: number;
   active: boolean;
@@ -25,6 +89,8 @@ export interface TabWatchState {
   showCountdown: boolean;
   /** Epoch ms when the next refresh is scheduled to fire. */
   nextRefreshAt: number | null;
+  monitor: MonitorConfig;
+  monitorState: MonitorRuntimeState;
 }
 
 export const DEFAULT_INTERVAL: IntervalConfig = {
@@ -49,6 +115,8 @@ export function createDefaultState(tabId: number): TabWatchState {
     pauseOnInteraction: false,
     showCountdown: false,
     nextRefreshAt: null,
+    monitor: { ...DEFAULT_MONITOR_CONFIG },
+    monitorState: createDefaultMonitorState(),
   };
 }
 
@@ -79,9 +147,26 @@ export type RuntimeMessage =
   | { type: 'start'; tabId: number; settings: TabSettings }
   | { type: 'stop'; tabId: number }
   | { type: 'update-settings'; tabId: number; settings: TabSettings }
-  | { type: 'resume'; tabId: number };
+  | { type: 'resume'; tabId: number }
+  | {
+      type: 'monitor-scan';
+      monitorState: MonitorRuntimeState;
+      triggered: boolean;
+      triggerKind: MonitorTriggerKind | null;
+    }
+  | { type: 'start-picker'; tabId: number }
+  | { type: 'cancel-picker'; tabId: number }
+  | { type: 'picker-result'; selector: string };
+
+/** Sent directly from the background worker to a tab's content script (not through RuntimeMessage's popup/content dispatch). */
+export type ContentCommand = { type: 'enter-picker-mode' } | { type: 'exit-picker-mode' };
 
 export type TabSettings = Pick<
   TabWatchState,
-  'interval' | 'hardRefresh' | 'refreshLimit' | 'pauseOnInteraction' | 'showCountdown'
+  | 'interval'
+  | 'hardRefresh'
+  | 'refreshLimit'
+  | 'pauseOnInteraction'
+  | 'showCountdown'
+  | 'monitor'
 >;

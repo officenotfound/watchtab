@@ -3,6 +3,9 @@ import { getAllTabStates, getTabState, removeTabState, setTabState } from '@/lib
 import {
   createDefaultState,
   resolveIntervalSeconds,
+  type ContentCommand,
+  type MonitorRuntimeState,
+  type MonitorTriggerKind,
   type RuntimeMessage,
   type TabWatchState,
 } from '@/lib/types';
@@ -117,6 +120,83 @@ async function handleRefreshDue(tabId: number): Promise<void> {
   await scheduleNext(updated);
 }
 
+async function sendToContent(tabId: number, command: ContentCommand): Promise<void> {
+  try {
+    await browser.tabs.sendMessage(tabId, command);
+  } catch {
+    // Content script may not be injected on this page (e.g. chrome:// URLs).
+  }
+}
+
+function alertMessage(kind: MonitorTriggerKind): string {
+  switch (kind) {
+    case 'found':
+      return 'A configured keyword was found on the page.';
+    case 'lost':
+      return 'A previously matching keyword is no longer on the page.';
+    case 'any-change':
+      return 'The monitored area of the page changed.';
+  }
+}
+
+async function fireMonitorAlert(tabId: number, state: TabWatchState, kind: MonitorTriggerKind): Promise<void> {
+  try {
+    await browser.notifications.create(`watchtab-monitor-${tabId}-${Date.now()}`, {
+      type: 'basic',
+      iconUrl: browser.runtime.getURL('/icon/128.png'),
+      title: 'Page Monitor',
+      message: alertMessage(kind),
+    });
+  } catch (err) {
+    // Logged rather than swallowed: a failure here is usually the OS or
+    // browser blocking notification permission, which is worth surfacing
+    // in the service worker console rather than failing invisibly.
+    console.error('watchtab: notifications.create failed', err);
+  }
+
+  if (state.monitor.windowFocus) {
+    try {
+      const tab = await browser.tabs.get(tabId);
+      if (tab.windowId !== undefined) {
+        await browser.windows.update(tab.windowId, { focused: true });
+      }
+      await browser.tabs.update(tabId, { active: true });
+    } catch (err) {
+      console.error('watchtab: window focus on detection failed', err);
+    }
+  }
+
+  // Matches the original product's own framing (its "continue refreshing
+  // after alert" option implies the default is to stop): once something is
+  // found/lost/changed, keep hammering the page with refreshes is rarely
+  // what the user wants unless they opted into it.
+  if (!state.monitor.continueRefreshingAfterAlert && state.active) {
+    await stopWatching(tabId);
+  }
+}
+
+async function handleMonitorScan(
+  tabId: number,
+  monitorState: MonitorRuntimeState,
+  triggered: boolean,
+  triggerKind: MonitorTriggerKind | null,
+): Promise<void> {
+  const state = await getTabState(tabId);
+  if (!state) return;
+
+  const updated: TabWatchState = {
+    ...state,
+    monitorState: triggered && triggerKind
+      ? { ...monitorState, lastTriggerAt: Date.now(), lastTriggerKind: triggerKind }
+      : monitorState,
+  };
+  await setTabState(updated);
+
+  if (triggered && triggerKind) {
+    await fireMonitorAlert(tabId, updated, triggerKind);
+  }
+}
+
 /** Re-arms in-memory timers from persisted state after a service worker restart. */
 async function recoverActiveTimers(): Promise<void> {
   const all = await getAllTabStates();
@@ -196,6 +276,40 @@ export default defineBackground(() => {
         }
         case 'resume': {
           void resumeWatching(message.tabId).then(() => sendResponse(true));
+          return true;
+        }
+        case 'monitor-scan': {
+          const tabId = sender.tab?.id;
+          if (tabId === undefined) {
+            sendResponse(false);
+            return false;
+          }
+          void handleMonitorScan(tabId, message.monitorState, message.triggered, message.triggerKind).then(
+            () => sendResponse(true),
+          );
+          return true;
+        }
+        case 'start-picker': {
+          void sendToContent(message.tabId, { type: 'enter-picker-mode' }).then(() => sendResponse(true));
+          return true;
+        }
+        case 'cancel-picker': {
+          void sendToContent(message.tabId, { type: 'exit-picker-mode' }).then(() => sendResponse(true));
+          return true;
+        }
+        case 'picker-result': {
+          const tabId = sender.tab?.id;
+          if (tabId === undefined) {
+            sendResponse(false);
+            return false;
+          }
+          void (async () => {
+            const existing = (await getTabState(tabId)) ?? createDefaultState(tabId);
+            await setTabState({
+              ...existing,
+              monitor: { ...existing.monitor, scopeMode: 'custom-area', customSelector: message.selector },
+            });
+          })().then(() => sendResponse(true));
           return true;
         }
         default:

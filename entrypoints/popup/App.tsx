@@ -4,6 +4,8 @@ import {
   createDefaultState,
   resolveIntervalSeconds,
   type IntervalMode,
+  type MonitorAlertMode,
+  type MonitorConfig,
   type TabWatchState,
 } from '@/lib/types';
 import './App.css';
@@ -83,8 +85,19 @@ function App() {
         refreshLimit: next.refreshLimit,
         pauseOnInteraction: next.pauseOnInteraction,
         showCountdown: next.showCountdown,
+        monitor: next.monitor,
       },
     });
+  }
+
+  async function applyMonitor(partial: Partial<MonitorConfig>) {
+    if (!state) return;
+    await applyLiveSettings({ monitor: { ...state.monitor, ...partial } });
+  }
+
+  async function pickElement() {
+    if (!tabId) return;
+    await browser.runtime.sendMessage({ type: 'start-picker', tabId });
   }
 
   async function handleStartStop() {
@@ -102,6 +115,7 @@ function App() {
           refreshLimit: state.refreshLimit,
           pauseOnInteraction: state.pauseOnInteraction,
           showCountdown: state.showCountdown,
+          monitor: state.monitor,
         },
       });
       setState({ ...state, active: true, paused: false, refreshCount: 0 });
@@ -312,6 +326,191 @@ function App() {
             onChange={(e) => void applyLiveSettings({ showCountdown: e.target.checked })}
           />
         </div>
+      </div>
+
+      <div className="section">
+        <div className="toggleRow">
+          <span className="toggleLabel">
+            Monitor page for changes
+            <span className="toggleHint">Watch for keywords, or any change in the page content</span>
+          </span>
+          <input
+            type="checkbox"
+            className="switch"
+            checked={state.monitor.enabled}
+            onChange={(e) => void applyMonitor({ enabled: e.target.checked })}
+          />
+        </div>
+
+        {state.monitor.enabled && (
+          <>
+            <div className="modeRow">
+              <button
+                type="button"
+                className={`modeButton${state.monitor.scopeMode === 'full-page' ? ' active' : ''}`}
+                onClick={() => void applyMonitor({ scopeMode: 'full-page' })}
+              >
+                Full page
+              </button>
+              <button
+                type="button"
+                className={`modeButton${state.monitor.scopeMode === 'custom-area' ? ' active' : ''}`}
+                onClick={() => void applyMonitor({ scopeMode: 'custom-area' })}
+              >
+                Custom area
+              </button>
+            </div>
+
+            {state.monitor.scopeMode === 'custom-area' && (
+              <div className="fieldRow">
+                <input
+                  className="numberInput"
+                  style={{ width: 'auto', flex: 1 }}
+                  type="text"
+                  placeholder="CSS selector"
+                  value={state.monitor.customSelector}
+                  onChange={(e) => void applyMonitor({ customSelector: e.target.value })}
+                />
+                <button type="button" className="chip" onClick={() => void pickElement()}>
+                  Pick element
+                </button>
+              </div>
+            )}
+
+            <div className="fieldRow">
+              <label htmlFor="monitor-keywords">Keywords</label>
+            </div>
+            <textarea
+              id="monitor-keywords"
+              className="numberInput"
+              style={{ width: '100%', minHeight: '44px', resize: 'vertical', fontFamily: 'var(--font-mono)', fontSize: '11.5px' }}
+              placeholder="Enter keyword, regex, XPath, or CSS selector (separate multiple with commas)…"
+              value={state.monitor.keywords}
+              onChange={(e) => void applyMonitor({ keywords: e.target.value })}
+            />
+            <p className="toggleHint">
+              plain word = keyword · ##(a OR b) AND c## = boolean · @@//div = XPath · $foo/i = regex
+            </p>
+
+            <div className="modeRow">
+              <button
+                type="button"
+                className={`modeButton${state.monitor.extractionMode === 'visual' ? ' active' : ''}`}
+                onClick={() => void applyMonitor({ extractionMode: 'visual' })}
+              >
+                Visual text
+              </button>
+              <button
+                type="button"
+                className={`modeButton${state.monitor.extractionMode === 'source' ? ' active' : ''}`}
+                onClick={() => void applyMonitor({ extractionMode: 'source' })}
+              >
+                Page source
+              </button>
+            </div>
+
+            <div className="modeRow">
+              {(
+                [
+                  ['found', 'Keyword found'],
+                  ['lost', 'Keyword lost'],
+                  ['any-change', 'Any change'],
+                ] as [MonitorAlertMode, string][]
+              ).map(([mode, label]) => (
+                <button
+                  key={mode}
+                  type="button"
+                  className={`modeButton${state.monitor.alertMode === mode ? ' active' : ''}`}
+                  onClick={() => void applyMonitor({ alertMode: mode })}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+
+            <div className="toggleRow">
+              <span className="toggleLabel">
+                Skip repeated keyword
+                <span className="toggleHint">Only alert once until the match changes</span>
+              </span>
+              <input
+                type="checkbox"
+                className="switch"
+                checked={state.monitor.skipRepeat}
+                onChange={(e) => void applyMonitor({ skipRepeat: e.target.checked })}
+              />
+            </div>
+            <div className="toggleRow">
+              <span className="toggleLabel">
+                Highlight keyword on page
+                <span className="toggleHint">Mark matched text in yellow</span>
+              </span>
+              <input
+                type="checkbox"
+                className="switch"
+                checked={state.monitor.highlight}
+                onChange={(e) => void applyMonitor({ highlight: e.target.checked })}
+              />
+            </div>
+            <div className="toggleRow">
+              <span className="toggleLabel">
+                Window focus on detection
+                <span className="toggleHint">Bring this tab to the front when triggered</span>
+              </span>
+              <input
+                type="checkbox"
+                className="switch"
+                checked={state.monitor.windowFocus}
+                onChange={(e) => void applyMonitor({ windowFocus: e.target.checked })}
+              />
+            </div>
+            <div className="toggleRow">
+              <span className="toggleLabel">
+                Continue refreshing after alert
+                <span className="toggleHint">Off stops the refresh timer once triggered</span>
+              </span>
+              <input
+                type="checkbox"
+                className="switch"
+                checked={state.monitor.continueRefreshingAfterAlert}
+                onChange={(e) =>
+                  void applyMonitor({ continueRefreshingAfterAlert: e.target.checked })
+                }
+              />
+            </div>
+            <div className="fieldRow">
+              <label htmlFor="monitor-wait">Wait for load</label>
+              <input
+                id="monitor-wait"
+                className="numberInput"
+                type="number"
+                min={0}
+                step={250}
+                value={state.monitor.waitForLoadMs}
+                onChange={(e) =>
+                  void applyMonitor({ waitForLoadMs: Math.max(0, Number(e.target.value) || 0) })
+                }
+              />
+              <span className="durationUnit">ms</span>
+            </div>
+
+            <div className="status" style={{ marginTop: '8px' }}>
+              <span className="statusText">
+                {state.monitorState.error ? (
+                  <>Monitor error — {state.monitorState.error}</>
+                ) : state.monitorState.lastScanAt ? (
+                  <>
+                    Monitoring active · last scan{' '}
+                    {Math.max(0, Math.round((now - state.monitorState.lastScanAt) / 1000))}s ago ·{' '}
+                    <strong>{state.monitorState.currentlyMatching ? 'matching' : 'not matching'}</strong>
+                  </>
+                ) : (
+                  <>Monitoring active · waiting for first scan</>
+                )}
+              </span>
+            </div>
+          </>
+        )}
       </div>
 
       {state.paused && state.active && (
