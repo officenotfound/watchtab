@@ -1,12 +1,11 @@
 # watchtab
 
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](./LICENSE)
-[![No account required](https://img.shields.io/badge/account-not%20required-brightgreen)](#)
 [![Chromium](https://img.shields.io/badge/chromium-mv3-orange)](#browser-support)
 
-An open-source auto-refresh and page-monitor browser extension. Refresh a tab on a schedule, watch a page for a keyword or any change, get notified the moment it happens — all fully visible in the UI, nothing gated, nothing phoning home.
+An open-source auto-refresh and page-monitor browser extension. Refresh a tab on a schedule, watch a page for a keyword or any change, get notified the moment it happens.
 
-Built as an alternative to closed-source tools in this category that hold core features (like AJAX-only refresh, unlimited alerts, or higher tiers of "smart monitoring") behind a paywall, and in at least one case ship a mechanism for a remote server to push configuration or script changes into the extension. watchtab has neither: no account, no server, no remote config channel of any kind. Every setting lives in your browser's local storage and every line of code that runs is in this repo.
+Some closed-source tools in this category hold core features behind a paywall (AJAX-only refresh, unlimited alerts, higher tiers of "smart monitoring"), and at least one ships a mechanism for a remote server to push configuration or script changes into the extension. watchtab was built as a direct alternative to that model. Every setting lives in your browser's own local storage, and every line of code that runs is sitting in this repo for you to read.
 
 ## Features
 
@@ -39,8 +38,8 @@ Everything is scoped per tab and cleaned up automatically when the tab closes.
 |---|---|
 | Chrome / Brave / other Chromium browsers | Supported (MV3) |
 | Edge | Should work as-is via the same Chromium MV3 build; not yet submitted to the Edge Add-ons store |
-| Firefox | Planned — WXT supports a Firefox target, not yet built/verified here |
-| Safari | Not planned near-term — requires a native app wrapper via Xcode, out of scope for now |
+| Firefox | Planned. WXT supports a Firefox target, not yet built or verified here. |
+| Safari | Not planned near-term. Requires a native app wrapper via Xcode, out of scope for now. |
 
 ## Installation (unpacked, for now)
 
@@ -66,14 +65,14 @@ npm run compile  # typecheck only, no build
 
 ### Testing
 
-The extension is covered by a Playwright end-to-end suite in `e2e/` that loads the actual unpacked build into a real headless Chromium instance and drives it — clicking through the popup, mutating live page content, and reading back real extension storage state — rather than testing against mocks. Run any test directly:
+The extension is covered by a Playwright end-to-end suite in `e2e/` that loads the actual unpacked build into a real headless Chromium instance and drives it: clicking through the popup, mutating live page content, and reading back real extension storage state, rather than testing against mocks. Run any test directly:
 
 ```sh
 npm run build
 node e2e/test1-found.mjs
 ```
 
-Each test file is self-contained and prints `RESULT: PASS` or `RESULT: FAIL`. Tests always run with `headless: true`-equivalent flags (`--headless=new`); if you're adding a new test, keep it that way — a visible browser window stealing OS focus on every run is not acceptable.
+Each test file is self-contained and prints `RESULT: PASS` or `RESULT: FAIL`. Tests always run with `headless: true`-equivalent flags (`--headless=new`); if you're adding a new test, keep it that way. A visible browser window stealing OS focus on every run is not acceptable.
 
 ## Contributing
 

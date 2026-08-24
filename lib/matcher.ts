@@ -165,7 +165,7 @@ function parsePrimary(tokens: BoolToken[], cur: Cursor): BoolNode {
     cur.i++;
     return { type: 'TERM', value: tok.term };
   }
-  // Stray operator/paren with no term — treat as an empty, never-matching term.
+  // Stray operator/paren with no term: treat as an empty, never-matching term.
   cur.i++;
   return { type: 'TERM', value: '' };
 }

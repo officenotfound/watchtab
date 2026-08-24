@@ -53,8 +53,8 @@ export interface MonitorRuntimeState {
    * continuous match. Deliberately independent of the found/lost
    * notification's skip-repeat bookkeeping: monitoring runs continuously as
    * soon as it's enabled (before "Start refreshing" and regardless of when
-   * automation toggles get turned on), so a match can transition to "found"
-   * — and consume the notification's one-shot trigger — before the user has
+   * automation toggles get turned on), so a match can transition to "found",
+   * consuming the notification's one-shot trigger, before the user has
    * finished configuring automation. Auto-click's contract is "click while
    * matching," so it needs its own arm/fire state rather than inheriting a
    * trigger that may have already fired for an unrelated reason.
@@ -278,7 +278,7 @@ export type RuntimeMessage =
        * Whether refreshing should be stopped right now, computed fresh every
        * scan rather than tied to the (skip-repeat, one-shot) notification
        * trigger above. Monitoring runs continuously as soon as it's enabled,
-       * before "Start refreshing" is ever clicked — so a found/lost edge can
+       * before "Start refreshing" is ever clicked, so a found/lost edge can
        * fire, and get consumed by skip-repeat, while the tab isn't refreshing
        * yet. If "stop on alert" only reacted to that same one-shot edge, it
        * would silently never fire once refreshing actually starts. This flag

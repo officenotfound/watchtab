@@ -85,12 +85,12 @@ export default defineContentScript({
       if (siteConditions.errorDetection) {
         parts.push(siteConditionsState.errorDetected ? 'error page detected' : 'no error');
       }
-      return `conditions — ${parts.join(', ')}`;
+      return `conditions: ${parts.join(', ')}`;
     }
 
     function monitorStatusLine(state: TabWatchState): string | null {
       if (!state.monitor.enabled) return null;
-      if (state.monitorState.error) return `monitor — ${state.monitorState.error}`;
+      if (state.monitorState.error) return `monitor: ${state.monitorState.error}`;
       const modeLabel =
         state.monitor.alertMode === 'found'
           ? 'found'
@@ -99,8 +99,8 @@ export default defineContentScript({
             : 'watching for changes';
       const matchLabel = state.monitorState.currentlyMatching ? 'matching' : 'not matching';
       return state.monitor.alertMode === 'any-change'
-        ? `monitor — ${modeLabel}`
-        : `monitor — ${modeLabel} (${matchLabel})`;
+        ? `monitor: ${modeLabel}`
+        : `monitor: ${modeLabel} (${matchLabel})`;
     }
 
     function renderState(state: TabWatchState | null): void {
@@ -118,12 +118,12 @@ export default defineContentScript({
 
       if (showRefreshLine && state) {
         if (state.paused) {
-          lines.push('watchtab — paused');
+          lines.push('watchtab: paused');
         } else if (!state.nextRefreshAt) {
-          lines.push('watchtab — waiting');
+          lines.push('watchtab: waiting');
         } else {
           const remainingSec = Math.max(0, Math.ceil((state.nextRefreshAt - Date.now()) / 1000));
-          lines.push(`watchtab — next refresh in ${remainingSec}s`);
+          lines.push(`watchtab: next refresh in ${remainingSec}s`);
         }
       }
 
@@ -308,7 +308,7 @@ export default defineContentScript({
       // whenever there's a live match not yet acted on, regardless of
       // whether the notification's own skip-repeat edge already came and
       // went before automation was turned on. Only an actual click "uses
-      // up" the match streak — a no-op attempt (auto-click still disabled,
+      // up" the match streak. A no-op attempt (auto-click still disabled,
       // or no anchor to click) must NOT mark it as fired, or turning
       // auto-click on later while still matching would silently never fire.
       const didAutoClick = anyMatch && !prev.autoClickFiredForMatch && runAutoClickKeyword(state, root, results);
@@ -328,7 +328,7 @@ export default defineContentScript({
         autoClickFiredForMatch: anyMatch && (prev.autoClickFiredForMatch || didAutoClick),
       };
 
-      // Idempotent for found/lost — re-asserted every scan from the current
+      // Idempotent for found/lost: re-asserted every scan from the current
       // level (matching / lost-having-matched), not the one-shot edge, so it
       // still fires even if that edge already came and went before "Start
       // refreshing" was clicked. any-change has no persistent level to

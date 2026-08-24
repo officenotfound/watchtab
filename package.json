@@ -1,6 +1,6 @@
 {
   "name": "watchtab",
-  "description": "Auto-refresh any tab on a timer, with on-page change awareness. Open source, no premium tier.",
+  "description": "Auto-refresh any tab on a timer and watch pages for changes. Open source.",
   "private": true,
   "version": "0.1.0",
   "type": "module",

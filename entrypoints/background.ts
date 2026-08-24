@@ -35,7 +35,7 @@ const ports = new Map<number, ReturnType<typeof browser.runtime.connect>>();
  * getTabState() then setTabState({...state, ...}), and without this queue
  * two overlapping calls can interleave their fetch/write so a later,
  * non-triggering scan silently clobbers a stop-refreshing write that a
- * concurrent triggering scan's fireMonitorAlert() just made — observed as
+ * concurrent triggering scan's fireMonitorAlert() just made. Observed as
  * an intermittent, timing-dependent failure to stop on alert, not a
  * deterministic bug, which is what made it easy to miss in early testing.
  */

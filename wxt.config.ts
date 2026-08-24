@@ -5,7 +5,7 @@ export default defineConfig({
   modules: ['@wxt-dev/module-react'],
   manifest: {
     name: 'watchtab',
-    description: 'Auto-refresh any tab on a timer. Open source, no premium tier, no remote kill switch.',
+    description: 'Auto-refresh any tab on a timer and watch pages for changes. Open source.',
     permissions: [
       'alarms',
       'storage',

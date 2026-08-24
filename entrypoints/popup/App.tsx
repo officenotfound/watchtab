@@ -703,7 +703,7 @@ function App() {
             <div className="status" style={{ marginTop: '8px' }}>
               <span className="statusText">
                 {state.monitorState.error ? (
-                  <>Monitor error — {state.monitorState.error}</>
+                  <>Monitor error: {state.monitorState.error}</>
                 ) : state.monitorState.lastScanAt ? (
                   <>
                     Monitoring active · last scan{' '}
@@ -824,7 +824,7 @@ function App() {
         )}
         {state.siteConditionsState.redirected && (
           <div className="status" style={{ marginTop: '8px' }}>
-            <span className="statusText">Refresh stopped — page redirected from its original URL.</span>
+            <span className="statusText">Refresh stopped: page redirected from its original URL.</span>
           </div>
         )}
       </div>
@@ -990,12 +990,12 @@ function App() {
               <div className="fieldRow" key={i}>
                 <span className="toggleHint" style={{ flex: 1 }}>
                   {i + 1}. {step.type}
-                  {'selector' in step ? ` — ${step.selector}` : ''}
+                  {'selector' in step ? ` (${step.selector})` : ''}
                   {'value' in step ? ` = ${step.value}` : ''}
-                  {step.type === 'wait' ? ` — ${step.durationMs}ms` : ''}
-                  {step.type === 'navigate' ? ` — ${step.url}` : ''}
-                  {step.type === 'scroll' ? ` — ${step.target}` : ''}
-                  {step.type === 'keypress' ? ` — ${step.key}` : ''}
+                  {step.type === 'wait' ? ` (${step.durationMs}ms)` : ''}
+                  {step.type === 'navigate' ? ` (${step.url})` : ''}
+                  {step.type === 'scroll' ? ` (${step.target})` : ''}
+                  {step.type === 'keypress' ? ` (${step.key})` : ''}
                 </span>
                 <button type="button" className="chip" onClick={() => moveMacroStep(i, -1)} disabled={i === 0}>
                   Up
@@ -1027,7 +1027,7 @@ function App() {
             </div>
             {isRecording && (
               <p className="toggleHint">
-                Recording — {recordedSteps.length} step{recordedSteps.length === 1 ? '' : 's'} captured so far.
+                Recording: {recordedSteps.length} step{recordedSteps.length === 1 ? '' : 's'} captured so far.
               </p>
             )}
 
@@ -1049,7 +1049,7 @@ function App() {
                 Save JSON
               </button>
             </div>
-            {macroJsonError && <p className="toggleHint">Invalid JSON — {macroJsonError}</p>}
+            {macroJsonError && <p className="toggleHint">Invalid JSON: {macroJsonError}</p>}
           </>
         )}
       </div>
