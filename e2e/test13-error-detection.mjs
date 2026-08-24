@@ -57,6 +57,9 @@ try {
   await popup.reload();
   await popup.waitForTimeout(500);
 
+  await popup.locator('.tabRow .modeButton', { hasText: 'Conditions' }).click();
+  await popup.waitForTimeout(200);
+
   const errorToggle = popup
     .locator('.toggleRow', { hasText: 'Detect Error Pages' })
     .locator('input[type="checkbox"]');

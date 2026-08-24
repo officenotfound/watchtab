@@ -51,6 +51,8 @@ try {
   await popup.getByRole('button', { name: '5s', exact: true }).click();
   await popup.waitForTimeout(200);
 
+  await popup.locator('.tabRow .modeButton', { hasText: 'Automation' }).click();
+  await popup.waitForTimeout(200);
   await popup.locator('.chip', { hasText: 'Add cookie rule' }).click();
   await popup.waitForTimeout(200);
   await popup.locator('input[placeholder="cookie name"]').fill('watchtab_test');

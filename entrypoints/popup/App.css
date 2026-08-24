@@ -70,6 +70,10 @@
   margin-bottom: 8px;
 }
 
+.tabRow {
+  margin-bottom: 12px;
+}
+
 .modeButton {
   flex: 1;
   background: var(--surface);

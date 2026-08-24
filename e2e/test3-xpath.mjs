@@ -49,6 +49,9 @@ try {
   await popup.reload();
   await popup.waitForTimeout(500);
 
+  await popup.locator('.tabRow .modeButton', { hasText: 'Monitor' }).click();
+  await popup.waitForTimeout(200);
+
   const monitorToggle = popup
     .locator('.toggleRow', { hasText: 'Monitor page for changes' })
     .locator('input[type="checkbox"]');

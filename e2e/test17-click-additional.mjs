@@ -50,6 +50,8 @@ try {
   await popup.reload();
   await popup.waitForTimeout(500);
 
+  await popup.locator('.tabRow .modeButton', { hasText: 'Automation' }).click();
+  await popup.waitForTimeout(200);
   await popup.locator('.chip', { hasText: 'Add manually' }).click();
   await popup.waitForTimeout(200);
   await popup.locator('input[placeholder="CSS selector"]').fill('#accept');

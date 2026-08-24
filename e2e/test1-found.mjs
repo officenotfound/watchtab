@@ -65,14 +65,14 @@ try {
   await popup.reload();
   await popup.waitForTimeout(500);
 
-  await popup.screenshot({ path: 'e2e/debug-before-monitor-toggle.png' });
+  await popup.locator('.tabRow .modeButton', { hasText: 'Monitor' }).click();
+  await popup.waitForTimeout(200);
 
   const monitorToggle = popup
     .locator('.toggleRow', { hasText: 'Monitor page for changes' })
     .locator('input[type="checkbox"]');
   await monitorToggle.click();
   await popup.waitForTimeout(300);
-  await popup.screenshot({ path: 'e2e/debug-after-monitor-toggle.png' });
 
   const keywordBox = popup.locator('#monitor-keywords');
   await keywordBox.waitFor({ state: 'visible', timeout: 5000 });

@@ -34,9 +34,19 @@ function formatPreset(seconds: number): string {
   return seconds < 60 ? `${seconds}s` : `${seconds / 60}m`;
 }
 
+type PopupTab = 'refresh' | 'monitor' | 'automation' | 'conditions';
+
+const POPUP_TABS: [PopupTab, string][] = [
+  ['refresh', 'Refresh'],
+  ['monitor', 'Monitor'],
+  ['automation', 'Automation'],
+  ['conditions', 'Conditions'],
+];
+
 function App() {
   const [tabId, setTabId] = useState<number | null>(null);
   const [tabTitle, setTabTitle] = useState('');
+  const [activeTab, setActiveTab] = useState<PopupTab>('refresh');
   const [state, setState] = useState<TabWatchState | null>(null);
   const [now, setNow] = useState(() => Date.now());
   const [isRecording, setIsRecording] = useState(false);
@@ -296,6 +306,21 @@ function App() {
         </p>
       </div>
 
+      <div className="modeRow tabRow">
+        {POPUP_TABS.map(([tab, label]) => (
+          <button
+            key={tab}
+            type="button"
+            className={`modeButton${activeTab === tab ? ' active' : ''}`}
+            onClick={() => setActiveTab(tab)}
+          >
+            {label}
+          </button>
+        ))}
+      </div>
+
+      {activeTab === 'refresh' && (
+      <>
       <div className="status">
         <span className="statusText">
           {state.active ? (
@@ -480,7 +505,11 @@ function App() {
           />
         </div>
       </div>
+      </>
+      )}
 
+      {activeTab === 'monitor' && (
+      <>
       <div className="section">
         <div className="toggleRow">
           <span className="toggleLabel">
@@ -681,7 +710,11 @@ function App() {
           </>
         )}
       </div>
+      </>
+      )}
 
+      {activeTab === 'conditions' && (
+      <>
       <div className="section">
         <p className="sectionLabel">Site conditions</p>
         <div className="toggleRow">
@@ -787,7 +820,11 @@ function App() {
           </div>
         )}
       </div>
+      </>
+      )}
 
+      {activeTab === 'automation' && (
+      <>
       <div className="section">
         <p className="sectionLabel">Automation</p>
         <div className="toggleRow">
@@ -1008,6 +1045,8 @@ function App() {
           </>
         )}
       </div>
+      </>
+      )}
 
       {state.paused && state.active && (
         <button

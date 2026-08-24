@@ -59,9 +59,13 @@ try {
   await popup.reload();
   await popup.waitForTimeout(500);
 
+  await popup.locator('.tabRow .modeButton', { hasText: 'Conditions' }).click();
+  await popup.waitForTimeout(200);
   await popup.getByText('Follow Canonical URL').click();
   await popup.waitForTimeout(300);
 
+  await popup.locator('.tabRow .modeButton', { hasText: 'Refresh' }).click();
+  await popup.waitForTimeout(200);
   await popup.getByText('5s', { exact: true }).click();
   await popup.waitForTimeout(200);
   await popup.getByText('Start refreshing').click();

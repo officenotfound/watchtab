@@ -56,6 +56,8 @@ try {
   await popup.reload();
   await popup.waitForTimeout(500);
 
+  await popup.locator('.tabRow .modeButton', { hasText: 'Automation' }).click();
+  await popup.waitForTimeout(200);
   await popup.locator('.toggleRow', { hasText: 'Run macro' }).locator('input[type="checkbox"]').click();
   await popup.waitForTimeout(200);
 
