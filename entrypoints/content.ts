@@ -118,12 +118,12 @@ export default defineContentScript({
 
       if (showRefreshLine && state) {
         if (state.paused) {
-          lines.push('watchtab: paused');
+          lines.push('Watchtab: paused');
         } else if (!state.nextRefreshAt) {
-          lines.push('watchtab: waiting');
+          lines.push('Watchtab: waiting');
         } else {
           const remainingSec = Math.max(0, Math.ceil((state.nextRefreshAt - Date.now()) / 1000));
-          lines.push(`watchtab: next refresh in ${remainingSec}s`);
+          lines.push(`Watchtab: next refresh in ${remainingSec}s`);
         }
       }
 

@@ -4,7 +4,7 @@ import { defineConfig } from 'wxt';
 export default defineConfig({
   modules: ['@wxt-dev/module-react'],
   manifest: {
-    name: 'watchtab',
+    name: 'Watchtab',
     description: 'Auto-refresh any tab on a timer and watch pages for changes. Open source.',
     permissions: [
       'alarms',

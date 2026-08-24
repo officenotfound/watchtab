@@ -300,7 +300,7 @@ function App() {
   return (
     <div className="app">
       <div className="header">
-        <svg className="brandMark" width="20" height="20" viewBox="0 0 20 20" fill="none" aria-label="watchtab">
+        <svg className="brandMark" width="20" height="20" viewBox="0 0 20 20" fill="none" aria-label="Watchtab">
           <path
             d="M16.5 10a6.5 6.5 0 1 1-2.1-4.8"
             stroke="var(--accent)"

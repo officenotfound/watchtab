@@ -1,11 +1,11 @@
-# watchtab
+# Watchtab
 
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](./LICENSE)
 [![Chromium](https://img.shields.io/badge/chromium-mv3-orange)](#browser-support)
 
 An open-source auto-refresh and page-monitor browser extension. Refresh a tab on a schedule, watch a page for a keyword or any change, get notified the moment it happens.
 
-Some closed-source tools in this category hold core features behind a paywall (AJAX-only refresh, unlimited alerts, higher tiers of "smart monitoring"), and at least one ships a mechanism for a remote server to push configuration or script changes into the extension. watchtab was built as a direct alternative to that model. Every setting lives in your browser's own local storage, and every line of code that runs is sitting in this repo for you to read.
+Some closed-source tools in this category hold core features behind a paywall (AJAX-only refresh, unlimited alerts, higher tiers of "smart monitoring"), and at least one ships a mechanism for a remote server to push configuration or script changes into the extension. Watchtab was built as a direct alternative to that model. Every setting lives in your browser's own local storage, and every line of code that runs is sitting in this repo for you to read.
 
 ## Features
 
