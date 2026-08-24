@@ -300,7 +300,15 @@ function App() {
   return (
     <div className="app">
       <div className="header">
-        <p className="brand">watchtab</p>
+        <svg className="brandMark" width="20" height="20" viewBox="0 0 20 20" fill="none" aria-label="watchtab">
+          <path
+            d="M16.5 10a6.5 6.5 0 1 1-2.1-4.8"
+            stroke="var(--accent)"
+            strokeWidth="2.1"
+            strokeLinecap="round"
+          />
+          <path d="M16.5 3.5V9h-5.5" stroke="var(--accent)" strokeWidth="2.1" strokeLinecap="round" strokeLinejoin="round" />
+        </svg>
         <p className="tabUrl" title={tabTitle}>
           {tabTitle}
         </p>
