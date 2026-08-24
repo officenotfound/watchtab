@@ -19,11 +19,12 @@ const { port } = server.address();
 const TEST_URL = `http://127.0.0.1:${port}/`;
 
 const context = await chromium.launchPersistentContext(USER_DATA_DIR, {
-  headless: false,
+  headless: false, // kept false: Playwright's own 'headless: true' breaks MV3 extension loading here; '--headless=new' below forces true headless instead (no OS window) while extensions still work.
   args: [
     `--disable-extensions-except=${EXT_PATH}`,
     `--load-extension=${EXT_PATH}`,
     '--no-first-run',
+    '--headless=new',
   ],
 });
 

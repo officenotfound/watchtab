@@ -77,6 +77,49 @@ export function createDefaultMonitorState(): MonitorRuntimeState {
   };
 }
 
+export type RedirectBehavior = 'follow-all' | 'follow-canonical';
+export type SiteConditionKind = 'captcha' | 'error' | 'redirect';
+
+export interface SiteConditionsConfig {
+  captchaDetection: boolean;
+  captchaSound: boolean;
+  errorDetection: boolean;
+  errorSound: boolean;
+  redirectBehavior: RedirectBehavior;
+  /** Tab's URL captured when refreshing started; used by 'follow-canonical' to detect a redirect away from it. */
+  originUrl: string | null;
+}
+
+export interface SiteConditionsRuntimeState {
+  lastDetectionAt: number | null;
+  lastDetectionKind: SiteConditionKind | null;
+  captchaDetected: boolean;
+  errorDetected: boolean;
+  /** HTTP status observed for the most recent main-frame navigation, if known. */
+  lastStatusCode: number | null;
+  redirected: boolean;
+}
+
+export const DEFAULT_SITE_CONDITIONS_CONFIG: SiteConditionsConfig = {
+  captchaDetection: false,
+  captchaSound: false,
+  errorDetection: false,
+  errorSound: false,
+  redirectBehavior: 'follow-all',
+  originUrl: null,
+};
+
+export function createDefaultSiteConditionsState(): SiteConditionsRuntimeState {
+  return {
+    lastDetectionAt: null,
+    lastDetectionKind: null,
+    captchaDetected: false,
+    errorDetected: false,
+    lastStatusCode: null,
+    redirected: false,
+  };
+}
+
 export interface TabWatchState {
   tabId: number;
   active: boolean;
@@ -91,6 +134,8 @@ export interface TabWatchState {
   nextRefreshAt: number | null;
   monitor: MonitorConfig;
   monitorState: MonitorRuntimeState;
+  siteConditions: SiteConditionsConfig;
+  siteConditionsState: SiteConditionsRuntimeState;
 }
 
 export const DEFAULT_INTERVAL: IntervalConfig = {
@@ -117,6 +162,8 @@ export function createDefaultState(tabId: number): TabWatchState {
     nextRefreshAt: null,
     monitor: { ...DEFAULT_MONITOR_CONFIG },
     monitorState: createDefaultMonitorState(),
+    siteConditions: { ...DEFAULT_SITE_CONDITIONS_CONFIG },
+    siteConditionsState: createDefaultSiteConditionsState(),
   };
 }
 
@@ -156,7 +203,8 @@ export type RuntimeMessage =
     }
   | { type: 'start-picker'; tabId: number }
   | { type: 'cancel-picker'; tabId: number }
-  | { type: 'picker-result'; selector: string };
+  | { type: 'picker-result'; selector: string }
+  | { type: 'site-condition-scan'; captchaDetected: boolean; errorDetected: boolean };
 
 /** Sent directly from the background worker to a tab's content script (not through RuntimeMessage's popup/content dispatch). */
 export type ContentCommand = { type: 'enter-picker-mode' } | { type: 'exit-picker-mode' };
@@ -169,4 +217,5 @@ export type TabSettings = Pick<
   | 'pauseOnInteraction'
   | 'showCountdown'
   | 'monitor'
+  | 'siteConditions'
 >;

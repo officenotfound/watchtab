@@ -6,6 +6,8 @@ import {
   type IntervalMode,
   type MonitorAlertMode,
   type MonitorConfig,
+  type RedirectBehavior,
+  type SiteConditionsConfig,
   type TabWatchState,
 } from '@/lib/types';
 import './App.css';
@@ -86,6 +88,7 @@ function App() {
         pauseOnInteraction: next.pauseOnInteraction,
         showCountdown: next.showCountdown,
         monitor: next.monitor,
+        siteConditions: next.siteConditions,
       },
     });
   }
@@ -93,6 +96,11 @@ function App() {
   async function applyMonitor(partial: Partial<MonitorConfig>) {
     if (!state) return;
     await applyLiveSettings({ monitor: { ...state.monitor, ...partial } });
+  }
+
+  async function applySiteConditions(partial: Partial<SiteConditionsConfig>) {
+    if (!state) return;
+    await applyLiveSettings({ siteConditions: { ...state.siteConditions, ...partial } });
   }
 
   async function pickElement() {
@@ -116,6 +124,7 @@ function App() {
           pauseOnInteraction: state.pauseOnInteraction,
           showCountdown: state.showCountdown,
           monitor: state.monitor,
+          siteConditions: state.siteConditions,
         },
       });
       setState({ ...state, active: true, paused: false, refreshCount: 0 });
@@ -510,6 +519,112 @@ function App() {
               </span>
             </div>
           </>
+        )}
+      </div>
+
+      <div className="section">
+        <p className="sectionLabel">Site conditions</p>
+        <div className="toggleRow">
+          <span className="toggleLabel">
+            Detect Captcha on Page
+            <span className="toggleHint">Looks for common captcha widgets; won't catch every kind</span>
+          </span>
+          <input
+            type="checkbox"
+            className="switch"
+            checked={state.siteConditions.captchaDetection}
+            onChange={(e) => void applySiteConditions({ captchaDetection: e.target.checked })}
+          />
+        </div>
+        {state.siteConditions.captchaDetection && (
+          <div className="toggleRow">
+            <span className="toggleLabel">
+              Play Alarm on Captcha Detection
+              <span className="toggleHint">Sound an alert tone in addition to the notification</span>
+            </span>
+            <input
+              type="checkbox"
+              className="switch"
+              checked={state.siteConditions.captchaSound}
+              onChange={(e) => void applySiteConditions({ captchaSound: e.target.checked })}
+            />
+          </div>
+        )}
+
+        <div className="toggleRow">
+          <span className="toggleLabel">
+            Detect Error Pages (e.g. 404)
+            <span className="toggleHint">Flag 4xx/5xx responses and common broken-page text</span>
+          </span>
+          <input
+            type="checkbox"
+            className="switch"
+            checked={state.siteConditions.errorDetection}
+            onChange={(e) => void applySiteConditions({ errorDetection: e.target.checked })}
+          />
+        </div>
+        {state.siteConditions.errorDetection && (
+          <div className="toggleRow">
+            <span className="toggleLabel">
+              Play Alarm on Error Detection
+              <span className="toggleHint">Sound an alert tone in addition to the notification</span>
+            </span>
+            <input
+              type="checkbox"
+              className="switch"
+              checked={state.siteConditions.errorSound}
+              onChange={(e) => void applySiteConditions({ errorSound: e.target.checked })}
+            />
+          </div>
+        )}
+
+        <div className="fieldRow">
+          <label>Redirection behavior</label>
+        </div>
+        <div className="modeRow">
+          {(
+            [
+              ['follow-all', 'Follow All Redirects'],
+              ['follow-canonical', 'Follow Canonical URL'],
+            ] as [RedirectBehavior, string][]
+          ).map(([mode, label]) => (
+            <button
+              key={mode}
+              type="button"
+              className={`modeButton${state.siteConditions.redirectBehavior === mode ? ' active' : ''}`}
+              onClick={() => void applySiteConditions({ redirectBehavior: mode })}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+        <p className="toggleHint">
+          Canonical mode stops refreshing and notifies you if the page navigates away from the URL
+          refreshing started on.
+        </p>
+
+        {(state.siteConditions.captchaDetection || state.siteConditions.errorDetection) && (
+          <div className="status" style={{ marginTop: '8px' }}>
+            <span className="statusText">
+              {state.siteConditionsState.captchaDetected && state.siteConditions.captchaDetection ? (
+                <>Captcha detected on page</>
+              ) : state.siteConditionsState.errorDetected && state.siteConditions.errorDetection ? (
+                <>
+                  Error page detected
+                  {state.siteConditionsState.lastStatusCode
+                    ? ` (status ${state.siteConditionsState.lastStatusCode})`
+                    : ''}
+                </>
+              ) : (
+                <>No captcha or error detected</>
+              )}
+            </span>
+          </div>
+        )}
+        {state.siteConditionsState.redirected && (
+          <div className="status" style={{ marginTop: '8px' }}>
+            <span className="statusText">Refresh stopped — page redirected from its original URL.</span>
+          </div>
         )}
       </div>
 

@@ -72,6 +72,19 @@ export default defineContentScript({
       overlay = null;
     }
 
+    function siteConditionsStatusLine(state: TabWatchState): string | null {
+      const { siteConditions, siteConditionsState } = state;
+      if (!siteConditions.captchaDetection && !siteConditions.errorDetection) return null;
+      const parts: string[] = [];
+      if (siteConditions.captchaDetection) {
+        parts.push(siteConditionsState.captchaDetected ? 'captcha detected' : 'no captcha');
+      }
+      if (siteConditions.errorDetection) {
+        parts.push(siteConditionsState.errorDetected ? 'error page detected' : 'no error');
+      }
+      return `conditions — ${parts.join(', ')}`;
+    }
+
     function monitorStatusLine(state: TabWatchState): string | null {
       if (!state.monitor.enabled) return null;
       if (state.monitorState.error) return `monitor — ${state.monitorState.error}`;
@@ -89,9 +102,10 @@ export default defineContentScript({
 
     function renderState(state: TabWatchState | null): void {
       const monitorLine = state ? monitorStatusLine(state) : null;
+      const conditionsLine = state ? siteConditionsStatusLine(state) : null;
       const showRefreshLine = !!state && state.active && state.showCountdown;
 
-      if (!showRefreshLine && !monitorLine) {
+      if (!showRefreshLine && !monitorLine && !conditionsLine) {
         removeOverlay();
         return;
       }
@@ -111,6 +125,7 @@ export default defineContentScript({
       }
 
       if (monitorLine) lines.push(monitorLine);
+      if (conditionsLine) lines.push(conditionsLine);
 
       el.textContent = '';
       lines.forEach((line, i) => {
@@ -295,6 +310,59 @@ export default defineContentScript({
         .catch(() => undefined);
     }
 
+    // ---- site conditions: captcha / error heuristics -------------------------
+    //
+    // These are heuristics, not certainty: sites vary widely in markup and
+    // wording. Expected false negatives include custom/branded captcha widgets
+    // that don't use the common vendor markers below, and error pages that
+    // render a 200 status with a friendly "oops" message instead of a numeric
+    // code. Treat detection as "probably", not "definitely".
+
+    const CAPTCHA_IFRAME_MARKERS = ['recaptcha', 'hcaptcha', 'turnstile', 'cloudflare'];
+    const CAPTCHA_TEXT_MARKERS = ['verify you are human', "i'm not a robot"];
+    const ERROR_TEXT_PHRASES = ['not found', 'page not found', 'service unavailable'];
+    // Case-sensitive on purpose: lowercase "404"/"500" style codes appearing in
+    // prose (prices, IDs, years) shouldn't false-positive; error pages reliably
+    // render the bare numeric code somewhere on the page.
+    const ERROR_CODE_PATTERN = /\b(4\d{2}|5\d{2})\b/;
+
+    function detectCaptcha(): boolean {
+      const iframes = document.querySelectorAll('iframe[src]');
+      for (const frame of iframes) {
+        const src = frame.getAttribute('src')?.toLowerCase() ?? '';
+        if (CAPTCHA_IFRAME_MARKERS.some((marker) => src.includes(marker))) return true;
+      }
+
+      const candidates = document.querySelectorAll('[id], [class]');
+      for (const el of candidates) {
+        const id = el.id?.toLowerCase() ?? '';
+        const className = typeof el.className === 'string' ? el.className.toLowerCase() : '';
+        if (id.includes('captcha') || className.includes('captcha')) return true;
+      }
+
+      const bodyText = (document.body?.innerText ?? '').toLowerCase();
+      return CAPTCHA_TEXT_MARKERS.some((marker) => bodyText.includes(marker));
+    }
+
+    function detectErrorPage(): boolean {
+      const bodyText = document.body?.innerText ?? '';
+      const lowerText = bodyText.toLowerCase();
+      if (ERROR_TEXT_PHRASES.some((phrase) => lowerText.includes(phrase))) return true;
+      return ERROR_CODE_PATTERN.test(bodyText);
+    }
+
+    async function runSiteConditionScan(state: TabWatchState): Promise<void> {
+      const { siteConditions } = state;
+      if (!siteConditions.captchaDetection && !siteConditions.errorDetection) return;
+
+      const captchaDetected = siteConditions.captchaDetection ? detectCaptcha() : false;
+      const errorDetected = siteConditions.errorDetection ? detectErrorPage() : false;
+
+      await browser.runtime
+        .sendMessage({ type: 'site-condition-scan', captchaDetected, errorDetected })
+        .catch(() => undefined);
+    }
+
     // ---- element picker ---------------------------------------------------
 
     let pickerActive = false;
@@ -374,6 +442,7 @@ export default defineContentScript({
       }
       if (state) {
         await runScan(state).catch(() => undefined);
+        await runSiteConditionScan(state).catch(() => undefined);
       }
     }
 

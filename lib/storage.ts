@@ -1,5 +1,11 @@
 import { browser } from 'wxt/browser';
-import { createDefaultMonitorState, DEFAULT_MONITOR_CONFIG, type TabWatchState } from './types';
+import {
+  createDefaultMonitorState,
+  createDefaultSiteConditionsState,
+  DEFAULT_MONITOR_CONFIG,
+  DEFAULT_SITE_CONDITIONS_CONFIG,
+  type TabWatchState,
+} from './types';
 
 const KEY_PREFIX = 'watchtab:tab:';
 
@@ -17,6 +23,8 @@ function normalize(state: TabWatchState): TabWatchState {
     ...state,
     monitor: state.monitor ?? { ...DEFAULT_MONITOR_CONFIG },
     monitorState: state.monitorState ?? createDefaultMonitorState(),
+    siteConditions: state.siteConditions ?? { ...DEFAULT_SITE_CONDITIONS_CONFIG },
+    siteConditionsState: state.siteConditionsState ?? createDefaultSiteConditionsState(),
   };
 }
 

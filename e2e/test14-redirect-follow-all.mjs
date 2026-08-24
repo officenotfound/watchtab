@@ -1,5 +1,5 @@
-// Extraction mode: "Visual text" (innerText) shouldn't see hidden text; "Page source"
-// (outerHTML) should.
+// Automated smoke test: "Follow All Redirects" (default) keeps refreshing the
+// tab even after it has navigated away from its original URL via a 302.
 import { chromium } from 'playwright';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -9,9 +9,15 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const EXT_PATH = path.resolve(__dirname, '../.output/chrome-mv3');
 const USER_DATA_DIR = path.resolve(__dirname, '.profile');
 
+// "/" always 302s to "/landing"; "/landing" serves a normal page.
 const server = http.createServer((req, res) => {
+  if (req.url === '/') {
+    res.writeHead(302, { Location: '/landing' });
+    res.end();
+    return;
+  }
   res.writeHead(200, { 'Content-Type': 'text/html' });
-  res.end(`<!doctype html><html><body><h1>Test Page</h1><div style="display:none">hiddenword</div></body></html>`);
+  res.end(`<!doctype html><html><body><h1>Landing page</h1></body></html>`);
 });
 await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
 const { port } = server.address();
@@ -33,11 +39,13 @@ try {
   if (!sw) sw = await context.waitForEvent('serviceworker', { timeout: 10000 });
   const extId = new URL(sw.url()).host;
   console.log('extension id:', extId);
+  sw.on('console', (msg) => console.log('[sw]', msg.type(), msg.text()));
 
   const page = await context.newPage();
   page.on('pageerror', (err) => console.log('[page error]', err.message));
   await page.goto(TEST_URL);
   await page.waitForTimeout(500);
+  console.log('landed on:', page.url());
   await page.bringToFront();
 
   const popup = await context.newPage();
@@ -47,34 +55,34 @@ try {
   await popup.reload();
   await popup.waitForTimeout(500);
 
-  const monitorToggle = popup
-    .locator('.toggleRow', { hasText: 'Monitor page for changes' })
-    .locator('input[type="checkbox"]');
-  await monitorToggle.click();
+  // Redirect behavior defaults to "Follow All Redirects" — no toggle needed.
+  // Use the fastest fixed preset (5s) to observe multiple refresh cycles quickly.
+  await popup.getByText('5s', { exact: true }).click();
+  await popup.waitForTimeout(200);
+  await popup.getByText('Start refreshing').click();
   await popup.waitForTimeout(300);
 
-  const keywordBox = popup.locator('#monitor-keywords');
-  await keywordBox.waitFor({ state: 'visible', timeout: 5000 });
-  await keywordBox.fill('hiddenword');
-  await popup.waitForTimeout(1500);
+  const dump = async () => {
+    const storageDump = await sw.evaluate(() => chrome.storage.local.get(null));
+    return Object.values(storageDump).find((v) => v && v.siteConditions);
+  };
 
-  let storageDump = await sw.evaluate(() => chrome.storage.local.get(null));
-  let tabState = Object.values(storageDump).find((v) => v && v.monitor);
-  console.log('visual mode (default), currentlyMatching:', tabState?.monitorState?.currentlyMatching);
-  const noMatchVisual = tabState?.monitorState?.currentlyMatching === false;
+  // Wait past one refresh interval so the background worker has reloaded the tab.
+  await page.waitForTimeout(6500);
+  await page.bringToFront();
 
-  await popup.locator('.modeButton', { hasText: 'Page source' }).click();
-  await popup.waitForTimeout(1500);
+  const state = await dump();
+  console.log('page url after wait:', page.url());
+  console.log('siteConditionsState:', JSON.stringify(state?.siteConditionsState));
+  console.log('active:', state?.active, 'refreshCount:', state?.refreshCount);
 
-  storageDump = await sw.evaluate(() => chrome.storage.local.get(null));
-  tabState = Object.values(storageDump).find((v) => v && v.monitor);
-  console.log('source mode, currentlyMatching:', tabState?.monitorState?.currentlyMatching);
-  const matchedSource = tabState?.monitorState?.currentlyMatching === true;
+  const stillActive = state?.active === true;
+  const refreshed = (state?.refreshCount ?? 0) >= 1;
+  const notStopped = state?.siteConditionsState?.redirected !== true;
 
-  const pass = noMatchVisual && matchedSource;
+  const pass = stillActive && refreshed && notStopped;
   if (!pass) {
-    console.log('EXPECTED: no match in Visual text mode; match in Page source mode');
-    console.log(`OBSERVED: noMatchVisual=${noMatchVisual}, matchedSource=${matchedSource}`);
+    console.log(`OBSERVED: stillActive=${stillActive}, refreshed=${refreshed}, notStopped=${notStopped}`);
   }
   console.log(pass ? '\nRESULT: PASS' : '\nRESULT: FAIL');
 } finally {
