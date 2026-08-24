@@ -3,16 +3,69 @@ import { browser } from 'wxt/browser';
 /**
  * Offscreen document: MV3 service workers can't play audio directly, so the
  * background worker creates this hidden document (via chrome.offscreen) and
- * messages it to play a short embedded alert tone. Nothing here ever
- * transmits data anywhere; it's local playback only.
+ * messages it to play a short alert tone. Nothing here ever transmits data
+ * anywhere; it's local playback only.
+ *
+ * The tone is synthesized directly via the Web Audio API rather than an
+ * embedded audio file: a light two-note chime (a bright fifth up, then a
+ * soft settle) with a fast attack and gentle exponential decay, aiming for
+ * the same "small, modern, non-jarring" register as a phone's default
+ * notification sound without reproducing any specific platform's actual
+ * proprietary tone.
  */
+let sharedContext: AudioContext | null = null;
 
-// Short synthesized beep (~0.25s, 880Hz), embedded so no network/file fetch is needed.
-const BEEP_DATA_URL =
-  'data:audio/wav;base64,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';
+function getContext(): AudioContext {
+  if (!sharedContext || sharedContext.state === 'closed') {
+    sharedContext = new AudioContext();
+  }
+  return sharedContext;
+}
+
+function playChimeNote(ctx: AudioContext, startAt: number, frequency: number, duration: number, peakGain: number): void {
+  const osc = ctx.createOscillator();
+  osc.type = 'sine';
+  osc.frequency.setValueAtTime(frequency, startAt);
+
+  // A quiet, slightly-detuned higher harmonic gives the note a touch of
+  // "bell" shimmer instead of a flat, synthetic sine-wave beep.
+  const harmonic = ctx.createOscillator();
+  harmonic.type = 'sine';
+  harmonic.frequency.setValueAtTime(frequency * 2.01, startAt);
+  const harmonicGain = ctx.createGain();
+  harmonicGain.gain.setValueAtTime(peakGain * 0.18, startAt);
+
+  const gain = ctx.createGain();
+  gain.gain.setValueAtTime(0, startAt);
+  gain.gain.linearRampToValueAtTime(peakGain, startAt + 0.012); // fast, soft attack
+  gain.gain.exponentialRampToValueAtTime(0.0001, startAt + duration); // gentle decay
+
+  osc.connect(gain);
+  harmonic.connect(harmonicGain);
+  harmonicGain.connect(gain);
+  gain.connect(ctx.destination);
+
+  osc.start(startAt);
+  harmonic.start(startAt);
+  osc.stop(startAt + duration + 0.05);
+  harmonic.stop(startAt + duration + 0.05);
+}
+
+function playChime(): void {
+  const ctx = getContext();
+  const now = ctx.currentTime;
+  // A perfect fifth up (E6 -> B6), the classic "bright, resolved" interval
+  // most light notification chimes use, each note ~0.22s with a bit of
+  // overlap so it reads as one quick, modern chime rather than two beeps.
+  playChimeNote(ctx, now, 1318.51, 0.22, 0.22);
+  playChimeNote(ctx, now + 0.1, 1975.53, 0.28, 0.16);
+}
 
 browser.runtime.onMessage.addListener((message: { type: string }) => {
   if (message.type !== 'play-alert-sound') return;
-  const audio = new Audio(BEEP_DATA_URL);
-  void audio.play().catch((err) => console.error('watchtab offscreen: audio play failed', err));
+  try {
+    playChime();
+  } catch (err) {
+    console.error('watchtab offscreen: chime playback failed', err);
+  }
 });
