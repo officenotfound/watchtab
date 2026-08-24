@@ -55,8 +55,15 @@ body {
 }
 
 body {
-  width: 320px;
-  background: var(--bg);
+  /* 352px (not 320px): the 5-segment tab strip (Refresh/Monitor/Automation/
+     Conditions/Settings) needs the extra room — "Automation" and
+     "Conditions" don't fit a 1/5 share of 320px without truncating. */
+  width: 352px;
+  /* Transparent, not var(--bg): .app is the only surface that paints a
+     (translucent) background, so the glass-transparency slider actually
+     has something real behind it to blur/show through, instead of just
+     blending two opaque solids into a flat tint. */
+  background: transparent;
   color: var(--ink);
   font-family: var(--font-body);
   font-size: 13px;

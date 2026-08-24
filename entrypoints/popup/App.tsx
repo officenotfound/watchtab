@@ -1182,7 +1182,7 @@ function App() {
       </>
       )}
 
-      {state.paused && state.active && (
+      {activeTab !== 'settings' && state.paused && state.active && (
         <button
           type="button"
           className="primaryButton"
@@ -1196,13 +1196,18 @@ function App() {
         </button>
       )}
 
-      <button
-        type="button"
-        className={`primaryButton${state.active ? ' stop' : ''}`}
-        onClick={() => void handleStartStop()}
-      >
-        {state.active ? 'Stop refreshing' : 'Start refreshing'}
-      </button>
+      {/* Settings auto-saves each field on change (see applyAppearance) — there's
+          no pending action to submit, so Start/Stop (which belongs to the
+          per-tab refresh session, not these global preferences) doesn't apply here. */}
+      {activeTab !== 'settings' && (
+        <button
+          type="button"
+          className={`primaryButton${state.active ? ' stop' : ''}`}
+          onClick={() => void handleStartStop()}
+        >
+          {state.active ? 'Stop refreshing' : 'Start refreshing'}
+        </button>
+      )}
 
       <div className="footer">
         <span>MIT licensed, no account required</span>
