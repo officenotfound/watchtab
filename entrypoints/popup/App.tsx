@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { browser } from 'wxt/browser';
 import {
   createDefaultState,
@@ -48,6 +48,16 @@ function App() {
   const [tabTitle, setTabTitle] = useState('');
   const [activeTab, setActiveTab] = useState<PopupTab>('refresh');
   const [state, setState] = useState<TabWatchState | null>(null);
+  // Mirrors `state` synchronously (via the effect below), so
+  // applyLiveSettings can always merge onto the latest known state instead
+  // of whatever was captured in the closure of the render that created the
+  // event handler. In practice a single click's setState re-renders before
+  // the next click can fire, so this rarely matters, but it removes the
+  // theoretical race entirely rather than leaving it as an accepted risk.
+  const stateRef = useRef<TabWatchState | null>(null);
+  useEffect(() => {
+    stateRef.current = state;
+  }, [state]);
   const [now, setNow] = useState(() => Date.now());
   const [isRecording, setIsRecording] = useState(false);
   const [recordedSteps, setRecordedSteps] = useState<MacroStep[]>([]);
@@ -113,8 +123,10 @@ function App() {
   }
 
   async function applyLiveSettings(partial: Partial<TabWatchState>) {
-    if (!state || !tabId) return;
-    const next = { ...state, ...partial };
+    const base = stateRef.current ?? state;
+    if (!base || !tabId) return;
+    const next = { ...base, ...partial };
+    stateRef.current = next;
     setState(next);
     // Persisted regardless of active state, so a choice made before Start
     // survives the popup's own 1s state poll instead of being overwritten
@@ -580,6 +592,10 @@ function App() {
             />
             <p className="toggleHint">
               plain word = keyword · ##(a OR b) AND c## = boolean · @@//div = XPath · $foo/i = regex
+            </p>
+            <p className="toggleHint">
+              Commas separate multiple entries, so a phrase with a comma in it (like "Black, Friday") will be
+              split into two separate keywords. Wrap it in a regex group instead: $(?:Black, Friday)
             </p>
             <div className="fieldRow">
               <label>Templates</label>

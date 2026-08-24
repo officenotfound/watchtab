@@ -28,6 +28,7 @@ export function parseTopLevelExpressions(raw: string): string[] {
   const parts: string[] = [];
   let depth = 0;
   let bracketDepth = 0;
+  let braceDepth = 0;
   let current = '';
 
   for (const ch of raw) {
@@ -35,8 +36,12 @@ export function parseTopLevelExpressions(raw: string): string[] {
     else if (ch === ')') depth = Math.max(0, depth - 1);
     else if (ch === '[') bracketDepth++;
     else if (ch === ']') bracketDepth = Math.max(0, bracketDepth - 1);
+    // Regex quantifiers like {2,4} contain a comma that must not split the
+    // expression list, the same way a comma inside () or [] doesn't.
+    else if (ch === '{') braceDepth++;
+    else if (ch === '}') braceDepth = Math.max(0, braceDepth - 1);
 
-    if (ch === ',' && depth === 0 && bracketDepth === 0) {
+    if (ch === ',' && depth === 0 && bracketDepth === 0 && braceDepth === 0) {
       parts.push(current);
       current = '';
       continue;
@@ -73,11 +78,22 @@ function parseRegexExpr(expr: string): { pattern: string; flags: string } {
   return { pattern: body, flags: 'i' };
 }
 
+// A pattern with nested quantifiers (e.g. `(a+)+b`) can blow up exponentially
+// even against a fairly short string; there's no way to interrupt a
+// synchronous RegExp match from here without moving matching into a worker,
+// which is a bigger architectural change than this warrants given the
+// pattern has to be something the user typed themselves. Capping the input
+// length is a partial mitigation: it bounds the worst case for source-mode
+// matching against a huge page (which also amplifies linear-time patterns
+// into real, if less severe, slowdowns) without pretending to fully solve
+// catastrophic backtracking on a short string.
+const MAX_REGEX_INPUT_LENGTH = 500_000;
+
 function evaluateRegex(expr: string, text: string): ExpressionResult {
   const { pattern, flags } = parseRegexExpr(expr);
   try {
     const re = new RegExp(pattern, flags);
-    const match = text.match(re);
+    const match = text.slice(0, MAX_REGEX_INPUT_LENGTH).match(re);
     return {
       expr,
       kind: 'regex',
@@ -96,7 +112,15 @@ function evaluateRegex(expr: string, text: string): ExpressionResult {
 }
 
 function evaluateXPath(expr: string, root: Node): ExpressionResult {
-  const xpath = expr.slice(2);
+  const rawXpath = expr.slice(2);
+  // A leading "//" is short for "/descendant-or-self::node()/", which is
+  // anchored to the document root regardless of the context node passed to
+  // evaluate() — so "@@//div" would match anywhere on the page even when a
+  // custom-area scope is set. Rewriting it to ".//" makes it relative to the
+  // actual scoped root instead, which is what "search within this area"
+  // should mean. A single leading "/" (a deliberate document-absolute path)
+  // is left untouched.
+  const xpath = rawXpath.startsWith('//') ? `.${rawXpath}` : rawXpath;
   try {
     const doc = root.ownerDocument ?? (root as Document);
     const result = doc.evaluate(xpath, root, null, XPathResult.ANY_TYPE, null);

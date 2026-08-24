@@ -303,6 +303,8 @@ export default defineContentScript({
         highlightTerms(root, terms);
       }
 
+      const hasEverMatchedNext = prev.hasEverMatched || anyMatch;
+
       // Independent of the found/lost notification trigger (see the
       // autoClickFiredForMatch doc comment in lib/types.ts): attempted
       // whenever there's a live match not yet acted on, regardless of
@@ -312,20 +314,40 @@ export default defineContentScript({
       // or no anchor to click) must NOT mark it as fired, or turning
       // auto-click on later while still matching would silently never fire.
       const didAutoClick = anyMatch && !prev.autoClickFiredForMatch && runAutoClickKeyword(state, root, results);
-      if (triggered) {
-        runAutomationForTrigger(state, 'when-alert-triggers');
-      }
+
+      // Same fix, same reasoning, applied to click-targets/macros configured
+      // with the "when-alert-triggers" trigger: this used to ride the
+      // one-shot `triggered` flag directly, which meant it could silently
+      // never fire if the found/lost edge already happened (and was
+      // consumed by skip-repeat) before the user finished wiring up
+      // automation. found/lost are re-checked from the current level every
+      // scan instead; any-change has no persistent level to re-check, so it
+      // still rides the edge trigger (which is fine: any-change can't fire
+      // on the very first scan, since it needs a prior snapshot to diff
+      // against, so it's not exposed to the "already happened before armed"
+      // problem the same way found/lost are).
+      const automationConditionActive =
+        (monitor.alertMode === 'found' && anyMatch) || (monitor.alertMode === 'lost' && hasEverMatchedNext && !anyMatch);
+      // Re-attempted every scan while the condition holds and nothing has
+      // actually run yet for it — same "keep trying until it really
+      // happens" behavior as auto-click, rather than a single attempt that
+      // gets marked "fired" whether or not anything was actually configured
+      // or found on the page yet.
+      const shouldAttemptAutomation =
+        (automationConditionActive && !prev.automationFiredForMatch) || (monitor.alertMode === 'any-change' && triggered);
+      const didRunAutomation = shouldAttemptAutomation && runAutomationForTrigger(state, 'when-alert-triggers');
 
       const nextState: MonitorRuntimeState = {
         lastScanAt: Date.now(),
         matchedKeys: [...matchedNow],
-        hasEverMatched: prev.hasEverMatched || anyMatch,
+        hasEverMatched: hasEverMatchedNext,
         currentlyMatching: anyMatch,
         lastTriggerAt: prev.lastTriggerAt,
         lastTriggerKind: prev.lastTriggerKind,
         lastSnapshotHash: snapshotHash,
         error: firstError,
         autoClickFiredForMatch: anyMatch && (prev.autoClickFiredForMatch || didAutoClick),
+        automationFiredForMatch: automationConditionActive && (prev.automationFiredForMatch || didRunAutomation),
       };
 
       // Idempotent for found/lost: re-asserted every scan from the current
@@ -527,7 +549,11 @@ export default defineContentScript({
         if (r.kind === 'xpath') {
           try {
             const doc = root.ownerDocument ?? document;
-            const xpath = r.expr.slice(2);
+            const rawXpath = r.expr.slice(2);
+            // Same fix as lib/matcher.ts's evaluateXPath: a leading "//" is
+            // anchored to the document root regardless of context node, so
+            // rewrite it to ".//" to actually respect a custom-area scope.
+            const xpath = rawXpath.startsWith('//') ? `.${rawXpath}` : rawXpath;
             const evalResult = doc.evaluate(xpath, root, null, XPathResult.FIRST_ORDERED_NODE_TYPE, null);
             const node = evalResult.singleNodeValue;
             const el = node instanceof Element ? node : node?.parentElement ?? null;
@@ -573,20 +599,27 @@ export default defineContentScript({
       return true;
     }
 
-    function clickSelectorIfPresent(selector: string): void {
-      if (!selector.trim()) return;
+    /** Returns whether an element was actually found and clicked. */
+    function clickSelectorIfPresent(selector: string): boolean {
+      if (!selector.trim()) return false;
       try {
         const el = document.querySelector(selector);
-        (el as HTMLElement | null)?.click();
+        if (!el) return false;
+        (el as HTMLElement).click();
+        return true;
       } catch {
         // Invalid selector: ignore rather than throw, per spec.
+        return false;
       }
     }
 
-    function runClickTargets(state: TabWatchState, trigger: AutomationTrigger): void {
+    /** Returns whether at least one configured target for this trigger was actually clicked. */
+    function runClickTargets(state: TabWatchState, trigger: AutomationTrigger): boolean {
+      let didClick = false;
       for (const target of state.automation.clickTargets) {
-        if (target.trigger === trigger) clickSelectorIfPresent(target.selector);
+        if (target.trigger === trigger && clickSelectorIfPresent(target.selector)) didClick = true;
       }
+      return didClick;
     }
 
     // ---- macros: recorded step-sequence playback ---------------------------
@@ -674,11 +707,21 @@ export default defineContentScript({
       }
     }
 
-    function runAutomationForTrigger(state: TabWatchState, trigger: AutomationTrigger): void {
-      runClickTargets(state, trigger);
-      if (state.macro.enabled && state.macro.trigger === trigger) {
-        void runMacro(state.macro.steps);
-      }
+    /**
+     * Returns whether a real action actually happened (a click landed, or a
+     * macro was actually kicked off) — not just whether the trigger
+     * condition was met. This matters for the caller's "already fired for
+     * this match" bookkeeping: if nothing was configured yet (no click
+     * targets for this trigger, no matching macro), or a configured
+     * selector simply wasn't on the page, marking it "fired" would mean it
+     * never gets another chance once the user finishes configuring
+     * automation or the element actually appears.
+     */
+    function runAutomationForTrigger(state: TabWatchState, trigger: AutomationTrigger): boolean {
+      const didClick = runClickTargets(state, trigger);
+      const willRunMacro = state.macro.enabled && state.macro.trigger === trigger && state.macro.steps.length > 0;
+      if (willRunMacro) void runMacro(state.macro.steps);
+      return didClick || willRunMacro;
     }
 
     let eachRefreshAutomationRan = false;
@@ -696,7 +739,11 @@ export default defineContentScript({
         releasePort();
       }
       if (state) {
-        if (!eachRefreshAutomationRan) {
+        // "each-refresh" means once per page load caused by an actual
+        // refresh cycle; a tab that has monitoring/automation configured but
+        // never had "Start refreshing" clicked isn't refreshing at all, so
+        // there's no refresh for this to run "each" of.
+        if (state.active && !eachRefreshAutomationRan) {
           eachRefreshAutomationRan = true;
           runAutomationForTrigger(state, 'each-refresh');
         }

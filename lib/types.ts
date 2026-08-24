@@ -60,6 +60,8 @@ export interface MonitorRuntimeState {
    * trigger that may have already fired for an unrelated reason.
    */
   autoClickFiredForMatch: boolean;
+  /** Same idea as autoClickFiredForMatch, for "when-alert-triggers" click targets and macros. */
+  automationFiredForMatch: boolean;
 }
 
 export const DEFAULT_MONITOR_CONFIG: MonitorConfig = {
@@ -87,6 +89,7 @@ export function createDefaultMonitorState(): MonitorRuntimeState {
     lastSnapshotHash: null,
     error: null,
     autoClickFiredForMatch: false,
+    automationFiredForMatch: false,
   };
 }
 

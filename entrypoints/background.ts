@@ -41,13 +41,22 @@ const ports = new Map<number, ReturnType<typeof browser.runtime.connect>>();
  */
 const tabQueues = new Map<number, Promise<unknown>>();
 
-function enqueueForTab<T>(tabId: number, task: () => Promise<T>): Promise<T> {
+/**
+ * Never rejects to its caller: a thrown/rejected task is logged and the
+ * queue keeps moving, resolving with `undefined` instead. Every call site in
+ * this file chains a `.then(() => sendResponse(...))` with no `.catch`, so a
+ * rejection here used to mean sendResponse silently never fired and the
+ * sender's sendMessage() promise hung forever. Task functions that need to
+ * distinguish "ran but failed" from "succeeded" should catch internally and
+ * return a sentinel; this layer is purely about not losing the response.
+ */
+function enqueueForTab<T>(tabId: number, task: () => Promise<T>): Promise<T | undefined> {
   const prior = tabQueues.get(tabId) ?? Promise.resolve();
-  const settled = prior.then(task, task);
-  tabQueues.set(
-    tabId,
-    settled.catch(() => undefined),
-  );
+  const settled = prior.then(task, task).catch((err: unknown) => {
+    console.error('watchtab: queued tab task failed', tabId, err);
+    return undefined;
+  });
+  tabQueues.set(tabId, settled);
   return settled;
 }
 
@@ -548,11 +557,15 @@ export default defineBackground(() => {
             sendResponse(null);
             return false;
           }
-          void getTabState(tabId).then(sendResponse);
+          // Queued (not a bare read) so it can't land in between a pending
+          // write's fetch and commit and see a stale value for up to ~1s.
+          void enqueueForTab(tabId, () => getTabState(tabId)).then(sendResponse);
           return true;
         }
         case 'get-state': {
-          void getTabState(message.tabId).then((state) => sendResponse(state ?? null));
+          void enqueueForTab(message.tabId, () => getTabState(message.tabId)).then((state) =>
+            sendResponse(state ?? null),
+          );
           return true;
         }
         case 'start': {
@@ -619,7 +632,7 @@ export default defineBackground(() => {
             sendResponse(false);
             return false;
           }
-          void (async () => {
+          void enqueueForTab(tabId, async () => {
             const existing = (await getTabState(tabId)) ?? createDefaultState(tabId);
             if (message.target === 'custom-area') {
               await setTabState({
@@ -639,7 +652,7 @@ export default defineBackground(() => {
                 },
               });
             }
-          })().then(() => sendResponse(true));
+          }).then(() => sendResponse(true));
           return true;
         }
         case 'start-macro-recording': {
