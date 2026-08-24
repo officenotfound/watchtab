@@ -1,19 +1,26 @@
 .app {
   padding: 12px 14px 14px;
+  /* "Liquid glass" effect: a translucent panel over a blurred backdrop.
+     --glass-opacity is set inline from Settings (0-1) and controls how much
+     of whatever sits behind the popup shows through; the blur amount itself
+     stays fixed so the slider reads purely as a transparency control. */
+  background: color-mix(in srgb, var(--bg) calc(var(--glass-opacity, 0.85) * 100%), transparent);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
 }
 
 .header {
   display: flex;
-  align-items: baseline;
-  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+  justify-content: flex-start;
   margin-bottom: 10px;
 }
 
-.brand {
-  font-weight: 600;
-  font-size: 15px;
-  letter-spacing: -0.01em;
-  margin: 0;
+.brandMark {
+  width: 20px;
+  height: 20px;
+  flex-shrink: 0;
 }
 
 .tabUrl {
@@ -89,7 +96,7 @@
   padding: 5px 6px;
   font-size: 11.5px;
   color: var(--ink);
-  transition: background 0.15s ease, box-shadow 0.15s ease;
+  transition: background var(--transition-duration, 0.15s) ease, box-shadow var(--transition-duration, 0.15s) ease;
 }
 
 .modeButton:last-child {
@@ -124,7 +131,7 @@
   padding: 3px 8px;
   font-size: 11px;
   color: var(--ink);
-  transition: background 0.15s ease;
+  transition: background var(--transition-duration, 0.15s) ease;
 }
 
 .chip.active {
@@ -221,7 +228,7 @@
   background: var(--line);
   border-radius: 12px;
   cursor: pointer;
-  transition: background 0.15s ease;
+  transition: background var(--transition-duration, 0.15s) ease;
 }
 
 .switch:checked {
@@ -238,7 +245,7 @@
   background: #ffffff;
   border-radius: 50%;
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.3);
-  transition: transform 0.15s ease;
+  transition: transform var(--transition-duration, 0.15s) ease;
 }
 
 .switch:checked::before {
@@ -282,4 +289,27 @@
 
 .footer a {
   color: var(--ink-muted);
+}
+
+.swatchRow {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.swatch {
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  border: none;
+  padding: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 0 0 1px var(--line);
+  transition: box-shadow var(--transition-duration, 0.15s) ease, transform var(--transition-duration, 0.15s) ease;
+}
+
+.swatch.selected {
+  box-shadow: 0 0 0 2px var(--surface), 0 0 0 4px var(--ink);
 }
