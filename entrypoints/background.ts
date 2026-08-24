@@ -5,6 +5,8 @@ import {
   createDefaultState,
   resolveIntervalSeconds,
   type ContentCommand,
+  type CookieRule,
+  type CookieRuleTiming,
   type MonitorRuntimeState,
   type MonitorTriggerKind,
   type RuntimeMessage,
@@ -26,6 +28,29 @@ const HEARTBEAT_MINUTES = 0.5; // Chrome's practical floor for repeating alarms.
 const timers = new Map<number, ReturnType<typeof setTimeout>>();
 const ports = new Map<number, ReturnType<typeof browser.runtime.connect>>();
 
+/**
+ * Per-tab serialization for read-modify-write access to a tab's storage
+ * record. The content script's ~1s scan loop can produce several
+ * 'monitor-scan' messages in quick succession; each handler does
+ * getTabState() then setTabState({...state, ...}), and without this queue
+ * two overlapping calls can interleave their fetch/write so a later,
+ * non-triggering scan silently clobbers a stop-refreshing write that a
+ * concurrent triggering scan's fireMonitorAlert() just made — observed as
+ * an intermittent, timing-dependent failure to stop on alert, not a
+ * deterministic bug, which is what made it easy to miss in early testing.
+ */
+const tabQueues = new Map<number, Promise<unknown>>();
+
+function enqueueForTab<T>(tabId: number, task: () => Promise<T>): Promise<T> {
+  const prior = tabQueues.get(tabId) ?? Promise.resolve();
+  const settled = prior.then(task, task);
+  tabQueues.set(
+    tabId,
+    settled.catch(() => undefined),
+  );
+  return settled;
+}
+
 function clearTimer(tabId: number): void {
   const handle = timers.get(tabId);
   if (handle !== undefined) {
@@ -38,7 +63,7 @@ function armTimer(tabId: number, delayMs: number): void {
   clearTimer(tabId);
   timers.set(
     tabId,
-    setTimeout(() => void handleRefreshDue(tabId), Math.max(0, delayMs)),
+    setTimeout(() => void enqueueForTab(tabId, () => handleRefreshDue(tabId)), Math.max(0, delayMs)),
   );
 }
 
@@ -106,6 +131,46 @@ async function updateSettings(tabId: number, settings: Partial<TabWatchState>): 
   }
 }
 
+/** Applies every cookie rule for the given timing against the tab's current URL. */
+async function applyCookieRules(url: string, rules: CookieRule[], timing: CookieRuleTiming): Promise<void> {
+  const matching = rules.filter((r) => r.timing === timing);
+  for (const rule of matching) {
+    try {
+      if (rule.action === 'set') {
+        await browser.cookies.set({ url, name: rule.name, value: rule.value });
+      } else {
+        await browser.cookies.remove({ url, name: rule.name });
+      }
+    } catch (err) {
+      console.error('watchtab: cookie rule failed', rule, err);
+    }
+  }
+}
+
+/**
+ * Waits for the tab's main-frame navigation to finish loading (status
+ * 'complete'). More correct than a fixed delay: 'after-refresh' cookie rules
+ * are meant to apply once the freshly-reloaded page has actually settled, and
+ * load time varies a lot page to page. Capped at 15s so a page that never
+ * reaches 'complete' (e.g. a long-polling tab) can't stall the refresh cycle.
+ */
+function waitForTabLoad(tabId: number, timeoutMs = 15000): Promise<void> {
+  return new Promise((resolve) => {
+    let done = false;
+    const finish = () => {
+      if (done) return;
+      done = true;
+      browser.tabs.onUpdated.removeListener(listener);
+      resolve();
+    };
+    const listener = (updatedTabId: number, info: { status?: string }) => {
+      if (updatedTabId === tabId && info.status === 'complete') finish();
+    };
+    browser.tabs.onUpdated.addListener(listener);
+    setTimeout(finish, timeoutMs);
+  });
+}
+
 async function handleRefreshDue(tabId: number): Promise<void> {
   const state = await getTabState(tabId);
   if (!state || !state.active || state.paused) return;
@@ -115,6 +180,18 @@ async function handleRefreshDue(tabId: number): Promise<void> {
     return;
   }
 
+  let tabUrl: string | null = null;
+  try {
+    const tab = await browser.tabs.get(tabId);
+    tabUrl = tab.url ?? null;
+  } catch {
+    // Tab may have closed; fall through, cookie rules just get skipped below.
+  }
+
+  if (tabUrl && state.cookieRules.some((r) => r.timing === 'before-refresh')) {
+    await applyCookieRules(tabUrl, state.cookieRules, 'before-refresh');
+  }
+
   try {
     await browser.tabs.reload(tabId, { bypassCache: state.hardRefresh });
   } catch {
@@ -122,6 +199,11 @@ async function handleRefreshDue(tabId: number): Promise<void> {
     await removeTabState(tabId);
     clearTimer(tabId);
     return;
+  }
+
+  if (tabUrl && state.cookieRules.some((r) => r.timing === 'after-refresh')) {
+    await waitForTabLoad(tabId);
+    await applyCookieRules(tabUrl, state.cookieRules, 'after-refresh');
   }
 
   const updated: TabWatchState = { ...state, refreshCount: state.refreshCount + 1 };
@@ -180,14 +262,6 @@ async function fireMonitorAlert(tabId: number, state: TabWatchState, kind: Monit
       console.error('watchtab: window focus on detection failed', err);
     }
   }
-
-  // Matches the original product's own framing (its "continue refreshing
-  // after alert" option implies the default is to stop): once something is
-  // found/lost/changed, keep hammering the page with refreshes is rarely
-  // what the user wants unless they opted into it.
-  if (!state.monitor.continueRefreshingAfterAlert && state.active) {
-    await stopWatching(tabId);
-  }
 }
 
 async function handleMonitorScan(
@@ -195,6 +269,7 @@ async function handleMonitorScan(
   monitorState: MonitorRuntimeState,
   triggered: boolean,
   triggerKind: MonitorTriggerKind | null,
+  stopRefreshRequested: boolean,
 ): Promise<void> {
   const state = await getTabState(tabId);
   if (!state) return;
@@ -209,6 +284,15 @@ async function handleMonitorScan(
 
   if (triggered && triggerKind) {
     await fireMonitorAlert(tabId, updated, triggerKind);
+  }
+
+  // Computed fresh every scan (see the stopRefreshRequested doc comment in
+  // lib/types.ts) rather than tied to the one-shot trigger above, so it
+  // still fires even if that edge already came and went before "Start
+  // refreshing" was clicked. stopWatching is idempotent, so re-asserting it
+  // on every matching scan is safe.
+  if (stopRefreshRequested && updated.active) {
+    await stopWatching(tabId);
   }
 }
 
@@ -400,7 +484,7 @@ async function recoverActiveTimers(): Promise<void> {
     if (timers.has(state.tabId)) continue;
     const remaining = state.nextRefreshAt - now;
     if (remaining <= 0) {
-      void handleRefreshDue(state.tabId);
+      void enqueueForTab(state.tabId, () => handleRefreshDue(state.tabId));
     } else {
       armTimer(state.tabId, remaining);
     }
@@ -438,14 +522,14 @@ export default defineBackground(() => {
   browser.webRequest.onCompleted.addListener(
     (details) => {
       if (details.type !== 'main_frame' || details.tabId < 0) return;
-      void handleMainFrameStatus(details.tabId, details.statusCode);
+      void enqueueForTab(details.tabId, () => handleMainFrameStatus(details.tabId, details.statusCode));
     },
     { urls: ['<all_urls>'] },
   );
 
   browser.webNavigation.onCommitted.addListener((details) => {
     if (details.frameId !== 0) return; // main frame only
-    void handleCanonicalNavigation(details.tabId, details.url);
+    void enqueueForTab(details.tabId, () => handleCanonicalNavigation(details.tabId, details.url));
   });
 
   browser.runtime.onMessage.addListener(
@@ -454,7 +538,7 @@ export default defineBackground(() => {
         case 'user-interaction': {
           const tabId = sender.tab?.id;
           if (tabId !== undefined) {
-            void pauseWatching(tabId);
+            void enqueueForTab(tabId, () => pauseWatching(tabId));
           }
           return false;
         }
@@ -472,19 +556,23 @@ export default defineBackground(() => {
           return true;
         }
         case 'start': {
-          void startWatching(message.tabId, message.settings).then(() => sendResponse(true));
+          void enqueueForTab(message.tabId, () => startWatching(message.tabId, message.settings)).then(() =>
+            sendResponse(true),
+          );
           return true;
         }
         case 'stop': {
-          void stopWatching(message.tabId).then(() => sendResponse(true));
+          void enqueueForTab(message.tabId, () => stopWatching(message.tabId)).then(() => sendResponse(true));
           return true;
         }
         case 'update-settings': {
-          void updateSettings(message.tabId, message.settings).then(() => sendResponse(true));
+          void enqueueForTab(message.tabId, () => updateSettings(message.tabId, message.settings)).then(() =>
+            sendResponse(true),
+          );
           return true;
         }
         case 'resume': {
-          void resumeWatching(message.tabId).then(() => sendResponse(true));
+          void enqueueForTab(message.tabId, () => resumeWatching(message.tabId)).then(() => sendResponse(true));
           return true;
         }
         case 'monitor-scan': {
@@ -493,9 +581,15 @@ export default defineBackground(() => {
             sendResponse(false);
             return false;
           }
-          void handleMonitorScan(tabId, message.monitorState, message.triggered, message.triggerKind).then(
-            () => sendResponse(true),
-          );
+          void enqueueForTab(tabId, () =>
+            handleMonitorScan(
+              tabId,
+              message.monitorState,
+              message.triggered,
+              message.triggerKind,
+              message.stopRefreshRequested,
+            ),
+          ).then(() => sendResponse(true));
           return true;
         }
         case 'site-condition-scan': {
@@ -504,13 +598,15 @@ export default defineBackground(() => {
             sendResponse(false);
             return false;
           }
-          void handleSiteConditionScan(tabId, message.captchaDetected, message.errorDetected).then(() =>
-            sendResponse(true),
-          );
+          void enqueueForTab(tabId, () =>
+            handleSiteConditionScan(tabId, message.captchaDetected, message.errorDetected),
+          ).then(() => sendResponse(true));
           return true;
         }
         case 'start-picker': {
-          void sendToContent(message.tabId, { type: 'enter-picker-mode' }).then(() => sendResponse(true));
+          void sendToContent(message.tabId, { type: 'enter-picker-mode', target: message.target }).then(() =>
+            sendResponse(true),
+          );
           return true;
         }
         case 'cancel-picker': {
@@ -525,12 +621,39 @@ export default defineBackground(() => {
           }
           void (async () => {
             const existing = (await getTabState(tabId)) ?? createDefaultState(tabId);
-            await setTabState({
-              ...existing,
-              monitor: { ...existing.monitor, scopeMode: 'custom-area', customSelector: message.selector },
-            });
+            if (message.target === 'custom-area') {
+              await setTabState({
+                ...existing,
+                monitor: { ...existing.monitor, scopeMode: 'custom-area', customSelector: message.selector },
+              });
+            } else {
+              const id = `click-${Date.now()}-${Math.round(Math.random() * 1e6)}`;
+              await setTabState({
+                ...existing,
+                automation: {
+                  ...existing.automation,
+                  clickTargets: [
+                    ...existing.automation.clickTargets,
+                    { id, selector: message.selector, trigger: 'each-refresh' },
+                  ],
+                },
+              });
+            }
           })().then(() => sendResponse(true));
           return true;
+        }
+        case 'start-macro-recording': {
+          void sendToContent(message.tabId, { type: 'enter-recording-mode' }).then(() => sendResponse(true));
+          return true;
+        }
+        case 'stop-macro-recording': {
+          void sendToContent(message.tabId, { type: 'exit-recording-mode' }).then(() => sendResponse(true));
+          return true;
+        }
+        case 'macro-step-recorded': {
+          // Broadcast-only message: content script -> popup. The background
+          // worker has nothing to persist here (popup saves on Stop & Save).
+          return false;
         }
         default:
           return false;

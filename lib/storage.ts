@@ -2,6 +2,8 @@ import { browser } from 'wxt/browser';
 import {
   createDefaultMonitorState,
   createDefaultSiteConditionsState,
+  DEFAULT_AUTOMATION_CONFIG,
+  DEFAULT_MACRO_CONFIG,
   DEFAULT_MONITOR_CONFIG,
   DEFAULT_SITE_CONDITIONS_CONFIG,
   type TabWatchState,
@@ -25,6 +27,9 @@ function normalize(state: TabWatchState): TabWatchState {
     monitorState: state.monitorState ?? createDefaultMonitorState(),
     siteConditions: state.siteConditions ?? { ...DEFAULT_SITE_CONDITIONS_CONFIG },
     siteConditionsState: state.siteConditionsState ?? createDefaultSiteConditionsState(),
+    automation: state.automation ?? { ...DEFAULT_AUTOMATION_CONFIG, clickTargets: [] },
+    cookieRules: state.cookieRules ?? [],
+    macro: state.macro ?? { ...DEFAULT_MACRO_CONFIG, steps: [] },
   };
 }
 

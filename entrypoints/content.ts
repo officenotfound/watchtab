@@ -1,11 +1,14 @@
 import { browser } from 'wxt/browser';
-import { evaluateAllExpressions, hashString, parseTopLevelExpressions } from '@/lib/matcher';
+import { evaluateAllExpressions, hashString, parseTopLevelExpressions, type ExpressionResult } from '@/lib/matcher';
 import { generateSelector } from '@/lib/selector';
 import type {
+  AutomationTrigger,
   ContentCommand,
+  MacroStep,
   MonitorConfig,
   MonitorRuntimeState,
   MonitorTriggerKind,
+  PickerTarget,
   TabWatchState,
 } from '@/lib/types';
 
@@ -268,7 +271,13 @@ export default defineContentScript({
           currentlyMatching: false,
         };
         await browser.runtime
-          .sendMessage({ type: 'monitor-scan', monitorState: nextState, triggered: false, triggerKind: null })
+          .sendMessage({
+            type: 'monitor-scan',
+            monitorState: nextState,
+            triggered: false,
+            triggerKind: null,
+            stopRefreshRequested: false,
+          })
           .catch(() => undefined);
         return;
       }
@@ -294,6 +303,19 @@ export default defineContentScript({
         highlightTerms(root, terms);
       }
 
+      // Independent of the found/lost notification trigger (see the
+      // autoClickFiredForMatch doc comment in lib/types.ts): attempted
+      // whenever there's a live match not yet acted on, regardless of
+      // whether the notification's own skip-repeat edge already came and
+      // went before automation was turned on. Only an actual click "uses
+      // up" the match streak — a no-op attempt (auto-click still disabled,
+      // or no anchor to click) must NOT mark it as fired, or turning
+      // auto-click on later while still matching would silently never fire.
+      const didAutoClick = anyMatch && !prev.autoClickFiredForMatch && runAutoClickKeyword(state, root, results);
+      if (triggered) {
+        runAutomationForTrigger(state, 'when-alert-triggers');
+      }
+
       const nextState: MonitorRuntimeState = {
         lastScanAt: Date.now(),
         matchedKeys: [...matchedNow],
@@ -303,10 +325,22 @@ export default defineContentScript({
         lastTriggerKind: prev.lastTriggerKind,
         lastSnapshotHash: snapshotHash,
         error: firstError,
+        autoClickFiredForMatch: anyMatch && (prev.autoClickFiredForMatch || didAutoClick),
       };
 
+      // Idempotent for found/lost — re-asserted every scan from the current
+      // level (matching / lost-having-matched), not the one-shot edge, so it
+      // still fires even if that edge already came and went before "Start
+      // refreshing" was clicked. any-change has no persistent level to
+      // re-check, so it rides the edge trigger like the notification does.
+      const stopRefreshRequested =
+        !monitor.continueRefreshingAfterAlert &&
+        ((monitor.alertMode === 'found' && anyMatch) ||
+          (monitor.alertMode === 'lost' && nextState.hasEverMatched && !anyMatch) ||
+          (monitor.alertMode === 'any-change' && triggered));
+
       await browser.runtime
-        .sendMessage({ type: 'monitor-scan', monitorState: nextState, triggered, triggerKind: kind })
+        .sendMessage({ type: 'monitor-scan', monitorState: nextState, triggered, triggerKind: kind, stopRefreshRequested })
         .catch(() => undefined);
     }
 
@@ -368,6 +402,7 @@ export default defineContentScript({
     let pickerActive = false;
     let pickerHoverEl: Element | null = null;
     let pickerTimeout: number | null = null;
+    let pickerTarget: PickerTarget = 'custom-area';
 
     function pickerMouseOver(e: MouseEvent): void {
       const target = e.target;
@@ -385,7 +420,7 @@ export default defineContentScript({
       e.preventDefault();
       e.stopPropagation();
       const selector = generateSelector(target);
-      void browser.runtime.sendMessage({ type: 'picker-result', selector }).catch(() => undefined);
+      void browser.runtime.sendMessage({ type: 'picker-result', selector, target: pickerTarget }).catch(() => undefined);
       exitPicker();
     }
 
@@ -393,9 +428,10 @@ export default defineContentScript({
       if (e.key === 'Escape') exitPicker();
     }
 
-    function enterPicker(): void {
+    function enterPicker(target: PickerTarget): void {
       if (pickerActive) return;
       pickerActive = true;
+      pickerTarget = target;
       if (!document.getElementById('watchtab-picker-style')) {
         const style = document.createElement('style');
         style.id = 'watchtab-picker-style';
@@ -424,9 +460,228 @@ export default defineContentScript({
     }
 
     browser.runtime.onMessage.addListener((message: ContentCommand) => {
-      if (message.type === 'enter-picker-mode') enterPicker();
+      if (message.type === 'enter-picker-mode') enterPicker(message.target);
       if (message.type === 'exit-picker-mode') exitPicker();
+      if (message.type === 'enter-recording-mode') enterRecording();
+      if (message.type === 'exit-recording-mode') exitRecording();
     });
+
+    // ---- macro recording ---------------------------------------------------
+
+    let recordingActive = false;
+
+    function sendRecordedStep(step: MacroStep): void {
+      void browser.runtime.sendMessage({ type: 'macro-step-recorded', step }).catch(() => undefined);
+    }
+
+    function recordingClick(e: MouseEvent): void {
+      const target = e.target;
+      if (!(target instanceof Element) || target.id === OVERLAY_ID) return;
+      sendRecordedStep({ type: 'click', selector: generateSelector(target) });
+    }
+
+    function recordingInput(e: Event): void {
+      const target = e.target;
+      if (target instanceof HTMLSelectElement) {
+        sendRecordedStep({ type: 'select', selector: generateSelector(target), value: target.value });
+      } else if (target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement) {
+        sendRecordedStep({ type: 'fill', selector: generateSelector(target), value: target.value });
+      }
+    }
+
+    const IGNORED_RECORDING_KEYS = new Set(['Control', 'Shift', 'Alt', 'Meta']);
+
+    function recordingKeydown(e: KeyboardEvent): void {
+      if (IGNORED_RECORDING_KEYS.has(e.key)) return;
+      const target = e.target;
+      sendRecordedStep({
+        type: 'keypress',
+        key: e.key,
+        selector: target instanceof Element ? generateSelector(target) : undefined,
+      });
+    }
+
+    function enterRecording(): void {
+      if (recordingActive) return;
+      recordingActive = true;
+      document.addEventListener('click', recordingClick, true);
+      document.addEventListener('input', recordingInput, true);
+      document.addEventListener('keydown', recordingKeydown, true);
+    }
+
+    function exitRecording(): void {
+      if (!recordingActive) return;
+      recordingActive = false;
+      document.removeEventListener('click', recordingClick, true);
+      document.removeEventListener('input', recordingInput, true);
+      document.removeEventListener('keydown', recordingKeydown, true);
+    }
+
+    // ---- automation: auto-click keyword link + additional click targets ----
+
+    /** Finds the nearest <a> ancestor for whatever DOM node produced a matched expression, if any. */
+    function locateMatchAnchor(root: Element, results: ExpressionResult[]): HTMLAnchorElement | null {
+      for (const r of results) {
+        if (!r.matched) continue;
+
+        if (r.kind === 'xpath') {
+          try {
+            const doc = root.ownerDocument ?? document;
+            const xpath = r.expr.slice(2);
+            const evalResult = doc.evaluate(xpath, root, null, XPathResult.FIRST_ORDERED_NODE_TYPE, null);
+            const node = evalResult.singleNodeValue;
+            const el = node instanceof Element ? node : node?.parentElement ?? null;
+            const anchor = el?.closest('a');
+            if (anchor) return anchor as HTMLAnchorElement;
+          } catch {
+            // Invalid XPath already surfaced as a monitor error elsewhere.
+          }
+          continue;
+        }
+
+        for (const term of r.highlightTerms) {
+          if (!term) continue;
+          const lower = term.toLowerCase();
+          const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+          let n: Node | null;
+          // eslint-disable-next-line no-cond-assign
+          while ((n = walker.nextNode())) {
+            const value = (n.nodeValue ?? '').toLowerCase();
+            if (value.includes(lower)) {
+              const anchor = n.parentElement?.closest('a');
+              if (anchor) return anchor as HTMLAnchorElement;
+              break;
+            }
+          }
+        }
+      }
+      return null;
+    }
+
+    /** Returns whether a click actually fired, so the caller can tell an intentional no-op (disabled, no anchor) from a real action. */
+    function runAutoClickKeyword(state: TabWatchState, root: Element, results: ExpressionResult[]): boolean {
+      if (!state.automation.autoClickKeyword) return false;
+      const anchor = locateMatchAnchor(root, results);
+      if (!anchor) return false;
+      if (state.automation.autoClickOpenNewTab) {
+        const href = anchor.href;
+        if (!href) return false;
+        window.open(href, '_blank', 'noopener');
+      } else {
+        anchor.click();
+      }
+      return true;
+    }
+
+    function clickSelectorIfPresent(selector: string): void {
+      if (!selector.trim()) return;
+      try {
+        const el = document.querySelector(selector);
+        (el as HTMLElement | null)?.click();
+      } catch {
+        // Invalid selector: ignore rather than throw, per spec.
+      }
+    }
+
+    function runClickTargets(state: TabWatchState, trigger: AutomationTrigger): void {
+      for (const target of state.automation.clickTargets) {
+        if (target.trigger === trigger) clickSelectorIfPresent(target.selector);
+      }
+    }
+
+    // ---- macros: recorded step-sequence playback ---------------------------
+
+    const MACRO_STEP_GAP_MS = 200;
+
+    function sleep(ms: number): Promise<void> {
+      return new Promise((resolve) => window.setTimeout(resolve, ms));
+    }
+
+    function dispatchInputValue(el: HTMLInputElement | HTMLTextAreaElement, value: string): void {
+      el.focus();
+      el.value = value;
+      el.dispatchEvent(new Event('input', { bubbles: true }));
+      el.dispatchEvent(new Event('change', { bubbles: true }));
+    }
+
+    async function executeMacroStep(step: MacroStep): Promise<void> {
+      try {
+        switch (step.type) {
+          case 'click': {
+            const el = document.querySelector(step.selector);
+            (el as HTMLElement | null)?.click();
+            break;
+          }
+          case 'fill': {
+            const el = document.querySelector(step.selector);
+            if (el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement) {
+              dispatchInputValue(el, step.value);
+            }
+            break;
+          }
+          case 'select': {
+            const el = document.querySelector(step.selector);
+            if (el instanceof HTMLSelectElement) {
+              el.value = step.value;
+              el.dispatchEvent(new Event('change', { bubbles: true }));
+            }
+            break;
+          }
+          case 'keypress': {
+            const el = step.selector ? document.querySelector(step.selector) : document.activeElement;
+            if (el instanceof HTMLElement) {
+              el.dispatchEvent(new KeyboardEvent('keydown', { key: step.key, bubbles: true }));
+              el.dispatchEvent(new KeyboardEvent('keyup', { key: step.key, bubbles: true }));
+            }
+            break;
+          }
+          case 'wait': {
+            await sleep(Math.max(0, step.durationMs));
+            break;
+          }
+          case 'navigate': {
+            window.location.href = step.url;
+            break;
+          }
+          case 'scroll': {
+            if (step.target === 'top') {
+              window.scrollTo({ top: 0, behavior: 'auto' });
+            } else if (step.target === 'bottom') {
+              window.scrollTo({ top: document.documentElement.scrollHeight, behavior: 'auto' });
+            } else {
+              document.querySelector(step.target)?.scrollIntoView({ block: 'center' });
+            }
+            break;
+          }
+        }
+      } catch {
+        // A single bad step (invalid selector, etc.) shouldn't abort the rest of the macro.
+      }
+    }
+
+    let macroRunning = false;
+
+    async function runMacro(steps: MacroStep[]): Promise<void> {
+      if (macroRunning || steps.length === 0) return;
+      macroRunning = true;
+      try {
+        for (const step of steps) {
+          await executeMacroStep(step);
+          await sleep(MACRO_STEP_GAP_MS);
+        }
+      } finally {
+        macroRunning = false;
+      }
+    }
+
+    function runAutomationForTrigger(state: TabWatchState, trigger: AutomationTrigger): void {
+      runClickTargets(state, trigger);
+      if (state.macro.enabled && state.macro.trigger === trigger) {
+        void runMacro(state.macro.steps);
+      }
+    }
+
+    let eachRefreshAutomationRan = false;
 
     // ---- polling loop -------------------------------------------------------
 
@@ -441,6 +696,10 @@ export default defineContentScript({
         releasePort();
       }
       if (state) {
+        if (!eachRefreshAutomationRan) {
+          eachRefreshAutomationRan = true;
+          runAutomationForTrigger(state, 'each-refresh');
+        }
         await runScan(state).catch(() => undefined);
         await runSiteConditionScan(state).catch(() => undefined);
       }

@@ -3,14 +3,30 @@ import { browser } from 'wxt/browser';
 import {
   createDefaultState,
   resolveIntervalSeconds,
+  type AutomationConfig,
+  type AutomationTrigger,
+  type ClickTarget,
+  type CookieRule,
   type IntervalMode,
+  type MacroConfig,
+  type MacroStep,
   type MonitorAlertMode,
   type MonitorConfig,
   type RedirectBehavior,
   type SiteConditionsConfig,
   type TabWatchState,
 } from '@/lib/types';
+import { EXPRESSION_TEMPLATES } from '@/lib/templates';
 import './App.css';
+
+function newId(prefix: string): string {
+  return `${prefix}-${Date.now()}-${Math.round(Math.random() * 1e6)}`;
+}
+
+const TRIGGER_LABELS: [AutomationTrigger, string][] = [
+  ['each-refresh', 'Each refresh'],
+  ['when-alert-triggers', 'When alert triggers'],
+];
 
 const FIXED_PRESETS = [5, 10, 15, 30, 60, 300];
 
@@ -23,6 +39,21 @@ function App() {
   const [tabTitle, setTabTitle] = useState('');
   const [state, setState] = useState<TabWatchState | null>(null);
   const [now, setNow] = useState(() => Date.now());
+  const [isRecording, setIsRecording] = useState(false);
+  const [recordedSteps, setRecordedSteps] = useState<MacroStep[]>([]);
+  const [macroJsonText, setMacroJsonText] = useState('');
+  const [macroJsonError, setMacroJsonError] = useState<string | null>(null);
+
+  useEffect(() => {
+    function handler(message: unknown) {
+      const msg = message as { type?: string; step?: MacroStep };
+      if (msg?.type === 'macro-step-recorded' && msg.step) {
+        setRecordedSteps((prev) => [...prev, msg.step as MacroStep]);
+      }
+    }
+    browser.runtime.onMessage.addListener(handler);
+    return () => browser.runtime.onMessage.removeListener(handler);
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -89,6 +120,9 @@ function App() {
         showCountdown: next.showCountdown,
         monitor: next.monitor,
         siteConditions: next.siteConditions,
+        automation: next.automation,
+        cookieRules: next.cookieRules,
+        macro: next.macro,
       },
     });
   }
@@ -103,9 +137,116 @@ function App() {
     await applyLiveSettings({ siteConditions: { ...state.siteConditions, ...partial } });
   }
 
+  async function applyAutomation(partial: Partial<AutomationConfig>) {
+    if (!state) return;
+    await applyLiveSettings({ automation: { ...state.automation, ...partial } });
+  }
+
+  async function applyMacro(partial: Partial<MacroConfig>) {
+    if (!state) return;
+    await applyLiveSettings({ macro: { ...state.macro, ...partial } });
+  }
+
+  async function applyCookieRulesList(rules: CookieRule[]) {
+    if (!state) return;
+    await applyLiveSettings({ cookieRules: rules });
+  }
+
+  function applyTemplate(expression: string) {
+    if (!state) return;
+    const current = state.monitor.keywords.trim();
+    const next = current ? `${current}, ${expression}` : expression;
+    void applyMonitor({ keywords: next });
+  }
+
   async function pickElement() {
     if (!tabId) return;
-    await browser.runtime.sendMessage({ type: 'start-picker', tabId });
+    await browser.runtime.sendMessage({ type: 'start-picker', tabId, target: 'custom-area' });
+  }
+
+  async function pickClickTarget() {
+    if (!tabId) return;
+    await browser.runtime.sendMessage({ type: 'start-picker', tabId, target: 'click-target' });
+  }
+
+  function updateClickTarget(id: string, partial: Partial<ClickTarget>) {
+    if (!state) return;
+    const next = state.automation.clickTargets.map((t) => (t.id === id ? { ...t, ...partial } : t));
+    void applyAutomation({ clickTargets: next });
+  }
+
+  function removeClickTarget(id: string) {
+    if (!state) return;
+    void applyAutomation({ clickTargets: state.automation.clickTargets.filter((t) => t.id !== id) });
+  }
+
+  function addClickTarget() {
+    if (!state) return;
+    const next: ClickTarget = { id: newId('click'), selector: '', trigger: 'each-refresh' };
+    void applyAutomation({ clickTargets: [...state.automation.clickTargets, next] });
+  }
+
+  function updateCookieRule(id: string, partial: Partial<CookieRule>) {
+    if (!state) return;
+    void applyCookieRulesList(state.cookieRules.map((r) => (r.id === id ? { ...r, ...partial } : r)));
+  }
+
+  function removeCookieRule(id: string) {
+    if (!state) return;
+    void applyCookieRulesList(state.cookieRules.filter((r) => r.id !== id));
+  }
+
+  function addCookieRule() {
+    if (!state) return;
+    const next: CookieRule = { id: newId('cookie'), name: '', value: '', action: 'set', timing: 'before-refresh' };
+    void applyCookieRulesList([...state.cookieRules, next]);
+  }
+
+  function moveMacroStep(index: number, direction: -1 | 1) {
+    if (!state) return;
+    const steps = [...state.macro.steps];
+    const target = index + direction;
+    if (target < 0 || target >= steps.length) return;
+    const tmp = steps[index]!;
+    steps[index] = steps[target]!;
+    steps[target] = tmp;
+    void applyMacro({ steps });
+  }
+
+  function removeMacroStep(index: number) {
+    if (!state) return;
+    void applyMacro({ steps: state.macro.steps.filter((_, i) => i !== index) });
+  }
+
+  async function startRecording() {
+    if (!tabId) return;
+    setRecordedSteps([]);
+    setIsRecording(true);
+    await browser.runtime.sendMessage({ type: 'start-macro-recording', tabId });
+  }
+
+  async function stopAndSaveRecording() {
+    if (!tabId) return;
+    await browser.runtime.sendMessage({ type: 'stop-macro-recording', tabId });
+    setIsRecording(false);
+    await applyMacro({ steps: recordedSteps });
+  }
+
+  function loadStepsIntoEditor() {
+    if (!state) return;
+    setMacroJsonText(JSON.stringify(state.macro.steps, null, 2));
+    setMacroJsonError(null);
+  }
+
+  function saveStepsFromEditor() {
+    try {
+      const parsed = JSON.parse(macroJsonText);
+      if (!Array.isArray(parsed)) throw new Error('Steps must be a JSON array');
+      setMacroJsonError(null);
+      void applyMacro({ steps: parsed as MacroStep[] });
+    } catch (err) {
+      setMacroJsonError(err instanceof Error ? err.message : 'Invalid JSON');
+    }
   }
 
   async function handleStartStop() {
@@ -125,6 +266,9 @@ function App() {
           showCountdown: state.showCountdown,
           monitor: state.monitor,
           siteConditions: state.siteConditions,
+          automation: state.automation,
+          cookieRules: state.cookieRules,
+          macro: state.macro,
         },
       });
       setState({ ...state, active: true, paused: false, refreshCount: 0 });
@@ -400,6 +544,22 @@ function App() {
             <p className="toggleHint">
               plain word = keyword · ##(a OR b) AND c## = boolean · @@//div = XPath · $foo/i = regex
             </p>
+            <div className="fieldRow">
+              <label>Templates</label>
+            </div>
+            <div className="chipRow">
+              {EXPRESSION_TEMPLATES.map((tpl) => (
+                <button
+                  key={tpl.id}
+                  type="button"
+                  className="chip"
+                  title={tpl.expression}
+                  onClick={() => applyTemplate(tpl.expression)}
+                >
+                  {tpl.label}
+                </button>
+              ))}
+            </div>
 
             <div className="modeRow">
               <button
@@ -625,6 +785,227 @@ function App() {
           <div className="status" style={{ marginTop: '8px' }}>
             <span className="statusText">Refresh stopped — page redirected from its original URL.</span>
           </div>
+        )}
+      </div>
+
+      <div className="section">
+        <p className="sectionLabel">Automation</p>
+        <div className="toggleRow">
+          <span className="toggleLabel">
+            Auto-click keyword link
+            <span className="toggleHint">If a matched keyword is an (or inside an) &lt;a&gt; link, click it</span>
+          </span>
+          <input
+            type="checkbox"
+            className="switch"
+            checked={state.automation.autoClickKeyword}
+            onChange={(e) => void applyAutomation({ autoClickKeyword: e.target.checked })}
+          />
+        </div>
+        {state.automation.autoClickKeyword && (
+          <div className="toggleRow">
+            <span className="toggleLabel">
+              Open in new tab
+              <span className="toggleHint">Instead of clicking in place</span>
+            </span>
+            <input
+              type="checkbox"
+              className="switch"
+              checked={state.automation.autoClickOpenNewTab}
+              onChange={(e) => void applyAutomation({ autoClickOpenNewTab: e.target.checked })}
+            />
+          </div>
+        )}
+
+        <div className="fieldRow">
+          <label>Click additional elements</label>
+        </div>
+        {state.automation.clickTargets.map((target) => (
+          <div className="fieldRow" key={target.id}>
+            <input
+              className="numberInput"
+              style={{ width: 'auto', flex: 1 }}
+              type="text"
+              placeholder="CSS selector"
+              value={target.selector}
+              onChange={(e) => updateClickTarget(target.id, { selector: e.target.value })}
+            />
+            <select
+              className="numberInput"
+              style={{ width: 'auto' }}
+              value={target.trigger}
+              onChange={(e) => updateClickTarget(target.id, { trigger: e.target.value as AutomationTrigger })}
+            >
+              {TRIGGER_LABELS.map(([value, label]) => (
+                <option key={value} value={value}>
+                  {label}
+                </option>
+              ))}
+            </select>
+            <button type="button" className="chip" onClick={() => removeClickTarget(target.id)}>
+              Remove
+            </button>
+          </div>
+        ))}
+        <div className="chipRow">
+          <button type="button" className="chip" onClick={() => void pickClickTarget()}>
+            Pick target element
+          </button>
+          <button type="button" className="chip" onClick={addClickTarget}>
+            Add manually
+          </button>
+        </div>
+      </div>
+
+      <div className="section">
+        <p className="sectionLabel">Cookie automation</p>
+        {state.cookieRules.map((rule) => (
+          <div className="fieldRow" key={rule.id}>
+            <input
+              className="numberInput"
+              style={{ width: 'auto', flex: 1 }}
+              type="text"
+              placeholder="cookie name"
+              value={rule.name}
+              onChange={(e) => updateCookieRule(rule.id, { name: e.target.value })}
+            />
+            <input
+              className="numberInput"
+              style={{ width: 'auto', flex: 1 }}
+              type="text"
+              placeholder="value"
+              value={rule.value}
+              onChange={(e) => updateCookieRule(rule.id, { value: e.target.value })}
+              disabled={rule.action === 'delete'}
+            />
+            <select
+              className="numberInput"
+              style={{ width: 'auto' }}
+              value={rule.action}
+              onChange={(e) => updateCookieRule(rule.id, { action: e.target.value as CookieRule['action'] })}
+            >
+              <option value="set">Set</option>
+              <option value="delete">Delete</option>
+            </select>
+            <select
+              className="numberInput"
+              style={{ width: 'auto' }}
+              value={rule.timing}
+              onChange={(e) => updateCookieRule(rule.id, { timing: e.target.value as CookieRule['timing'] })}
+            >
+              <option value="before-refresh">Before refresh</option>
+              <option value="after-refresh">After refresh</option>
+            </select>
+            <button type="button" className="chip" onClick={() => removeCookieRule(rule.id)}>
+              Remove
+            </button>
+          </div>
+        ))}
+        <div className="chipRow">
+          <button type="button" className="chip" onClick={addCookieRule}>
+            Add cookie rule
+          </button>
+        </div>
+      </div>
+
+      <div className="section">
+        <p className="sectionLabel">Macros</p>
+        <div className="toggleRow">
+          <span className="toggleLabel">
+            Run macro
+            <span className="toggleHint">Play back a recorded sequence of actions</span>
+          </span>
+          <input
+            type="checkbox"
+            className="switch"
+            checked={state.macro.enabled}
+            onChange={(e) => void applyMacro({ enabled: e.target.checked })}
+          />
+        </div>
+
+        {state.macro.enabled && (
+          <>
+            <div className="modeRow">
+              {TRIGGER_LABELS.map(([value, label]) => (
+                <button
+                  key={value}
+                  type="button"
+                  className={`modeButton${state.macro.trigger === value ? ' active' : ''}`}
+                  onClick={() => void applyMacro({ trigger: value })}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+
+            <div className="fieldRow">
+              <label>Steps</label>
+            </div>
+            {state.macro.steps.map((step, i) => (
+              <div className="fieldRow" key={i}>
+                <span className="toggleHint" style={{ flex: 1 }}>
+                  {i + 1}. {step.type}
+                  {'selector' in step ? ` — ${step.selector}` : ''}
+                  {'value' in step ? ` = ${step.value}` : ''}
+                  {step.type === 'wait' ? ` — ${step.durationMs}ms` : ''}
+                  {step.type === 'navigate' ? ` — ${step.url}` : ''}
+                  {step.type === 'scroll' ? ` — ${step.target}` : ''}
+                  {step.type === 'keypress' ? ` — ${step.key}` : ''}
+                </span>
+                <button type="button" className="chip" onClick={() => moveMacroStep(i, -1)} disabled={i === 0}>
+                  Up
+                </button>
+                <button
+                  type="button"
+                  className="chip"
+                  onClick={() => moveMacroStep(i, 1)}
+                  disabled={i === state.macro.steps.length - 1}
+                >
+                  Down
+                </button>
+                <button type="button" className="chip" onClick={() => removeMacroStep(i)}>
+                  Remove
+                </button>
+              </div>
+            ))}
+
+            <div className="chipRow">
+              {!isRecording ? (
+                <button type="button" className="chip" onClick={() => void startRecording()}>
+                  Record
+                </button>
+              ) : (
+                <button type="button" className="chip active" onClick={() => void stopAndSaveRecording()}>
+                  Stop &amp; Save ({recordedSteps.length})
+                </button>
+              )}
+            </div>
+            {isRecording && (
+              <p className="toggleHint">
+                Recording — {recordedSteps.length} step{recordedSteps.length === 1 ? '' : 's'} captured so far.
+              </p>
+            )}
+
+            <div className="fieldRow">
+              <label>Edit as JSON</label>
+            </div>
+            <textarea
+              className="numberInput"
+              style={{ width: '100%', minHeight: '60px', resize: 'vertical', fontFamily: 'var(--font-mono)', fontSize: '11.5px' }}
+              value={macroJsonText}
+              onChange={(e) => setMacroJsonText(e.target.value)}
+              placeholder='[{"type":"click","selector":"#submit"}]'
+            />
+            <div className="chipRow">
+              <button type="button" className="chip" onClick={loadStepsIntoEditor}>
+                Load saved steps
+              </button>
+              <button type="button" className="chip" onClick={saveStepsFromEditor}>
+                Save JSON
+              </button>
+            </div>
+            {macroJsonError && <p className="toggleHint">Invalid JSON — {macroJsonError}</p>}
+          </>
         )}
       </div>
 

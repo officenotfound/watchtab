@@ -48,6 +48,18 @@ export interface MonitorRuntimeState {
   lastSnapshotHash: string | null;
   /** Set when a custom-area selector isn't found, or an expression fails to parse. */
   error: string | null;
+  /**
+   * Tracks whether the auto-click action has already run for the current
+   * continuous match. Deliberately independent of the found/lost
+   * notification's skip-repeat bookkeeping: monitoring runs continuously as
+   * soon as it's enabled (before "Start refreshing" and regardless of when
+   * automation toggles get turned on), so a match can transition to "found"
+   * — and consume the notification's one-shot trigger — before the user has
+   * finished configuring automation. Auto-click's contract is "click while
+   * matching," so it needs its own arm/fire state rather than inheriting a
+   * trigger that may have already fired for an unrelated reason.
+   */
+  autoClickFiredForMatch: boolean;
 }
 
 export const DEFAULT_MONITOR_CONFIG: MonitorConfig = {
@@ -74,6 +86,7 @@ export function createDefaultMonitorState(): MonitorRuntimeState {
     lastTriggerKind: null,
     lastSnapshotHash: null,
     error: null,
+    autoClickFiredForMatch: false,
   };
 }
 
@@ -120,6 +133,61 @@ export function createDefaultSiteConditionsState(): SiteConditionsRuntimeState {
   };
 }
 
+/** Shared trigger vocabulary for automation features (click targets, macros). */
+export type AutomationTrigger = 'each-refresh' | 'when-alert-triggers';
+
+export type PickerTarget = 'custom-area' | 'click-target';
+
+export interface ClickTarget {
+  id: string;
+  selector: string;
+  trigger: AutomationTrigger;
+}
+
+export interface AutomationConfig {
+  autoClickKeyword: boolean;
+  autoClickOpenNewTab: boolean;
+  clickTargets: ClickTarget[];
+}
+
+export const DEFAULT_AUTOMATION_CONFIG: AutomationConfig = {
+  autoClickKeyword: false,
+  autoClickOpenNewTab: false,
+  clickTargets: [],
+};
+
+export type CookieRuleAction = 'set' | 'delete';
+export type CookieRuleTiming = 'before-refresh' | 'after-refresh';
+
+export interface CookieRule {
+  id: string;
+  name: string;
+  value: string;
+  action: CookieRuleAction;
+  timing: CookieRuleTiming;
+}
+
+export type MacroStep =
+  | { type: 'click'; selector: string }
+  | { type: 'fill'; selector: string; value: string }
+  | { type: 'select'; selector: string; value: string }
+  | { type: 'keypress'; key: string; selector?: string }
+  | { type: 'wait'; durationMs: number }
+  | { type: 'navigate'; url: string }
+  | { type: 'scroll'; target: 'top' | 'bottom' | string };
+
+export interface MacroConfig {
+  enabled: boolean;
+  trigger: AutomationTrigger;
+  steps: MacroStep[];
+}
+
+export const DEFAULT_MACRO_CONFIG: MacroConfig = {
+  enabled: false,
+  trigger: 'each-refresh',
+  steps: [],
+};
+
 export interface TabWatchState {
   tabId: number;
   active: boolean;
@@ -136,6 +204,9 @@ export interface TabWatchState {
   monitorState: MonitorRuntimeState;
   siteConditions: SiteConditionsConfig;
   siteConditionsState: SiteConditionsRuntimeState;
+  automation: AutomationConfig;
+  cookieRules: CookieRule[];
+  macro: MacroConfig;
 }
 
 export const DEFAULT_INTERVAL: IntervalConfig = {
@@ -164,6 +235,9 @@ export function createDefaultState(tabId: number): TabWatchState {
     monitorState: createDefaultMonitorState(),
     siteConditions: { ...DEFAULT_SITE_CONDITIONS_CONFIG },
     siteConditionsState: createDefaultSiteConditionsState(),
+    automation: { ...DEFAULT_AUTOMATION_CONFIG, clickTargets: [] },
+    cookieRules: [],
+    macro: { ...DEFAULT_MACRO_CONFIG, steps: [] },
   };
 }
 
@@ -200,14 +274,34 @@ export type RuntimeMessage =
       monitorState: MonitorRuntimeState;
       triggered: boolean;
       triggerKind: MonitorTriggerKind | null;
+      /**
+       * Whether refreshing should be stopped right now, computed fresh every
+       * scan rather than tied to the (skip-repeat, one-shot) notification
+       * trigger above. Monitoring runs continuously as soon as it's enabled,
+       * before "Start refreshing" is ever clicked — so a found/lost edge can
+       * fire, and get consumed by skip-repeat, while the tab isn't refreshing
+       * yet. If "stop on alert" only reacted to that same one-shot edge, it
+       * would silently never fire once refreshing actually starts. This flag
+       * is idempotent for found/lost ("currently matching" / "currently
+       * lost" is just re-asserted every scan); any-change still rides the
+       * trigger above since it has no persistent level to re-check.
+       */
+      stopRefreshRequested: boolean;
     }
-  | { type: 'start-picker'; tabId: number }
+  | { type: 'start-picker'; tabId: number; target: PickerTarget }
   | { type: 'cancel-picker'; tabId: number }
-  | { type: 'picker-result'; selector: string }
-  | { type: 'site-condition-scan'; captchaDetected: boolean; errorDetected: boolean };
+  | { type: 'picker-result'; selector: string; target: PickerTarget }
+  | { type: 'site-condition-scan'; captchaDetected: boolean; errorDetected: boolean }
+  | { type: 'start-macro-recording'; tabId: number }
+  | { type: 'stop-macro-recording'; tabId: number }
+  | { type: 'macro-step-recorded'; step: MacroStep };
 
 /** Sent directly from the background worker to a tab's content script (not through RuntimeMessage's popup/content dispatch). */
-export type ContentCommand = { type: 'enter-picker-mode' } | { type: 'exit-picker-mode' };
+export type ContentCommand =
+  | { type: 'enter-picker-mode'; target: PickerTarget }
+  | { type: 'exit-picker-mode' }
+  | { type: 'enter-recording-mode' }
+  | { type: 'exit-recording-mode' };
 
 export type TabSettings = Pick<
   TabWatchState,
@@ -218,4 +312,7 @@ export type TabSettings = Pick<
   | 'showCountdown'
   | 'monitor'
   | 'siteConditions'
+  | 'automation'
+  | 'cookieRules'
+  | 'macro'
 >;
